@@ -10,6 +10,17 @@
  * - AI SDK Harnesses: HarnessAgent interface for running agent harnesses like Claude Code, Codex, and Pi.
  */
 
+/**
+ * Configure AI SDK Warning Handler
+ */
+if (typeof globalThis !== 'undefined') {
+  (globalThis as any).AI_SDK_LOG_WARNINGS = ({ warnings, provider, model }: any) => {
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn(`[AI SDK Warning] ${provider}/${model}:`, warnings);
+    }
+  };
+}
+
 export interface AIPersona {
   id: string;
   name: string;

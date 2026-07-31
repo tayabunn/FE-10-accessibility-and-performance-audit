@@ -79,10 +79,10 @@ export function MessageList({
 
   return (
     <div className="relative flex-1 min-h-0 w-full overflow-hidden">
-      {/* Scrollable Container */}
+      {/* Scrollable Container with Mobile Safari Rubber-Band Protection */}
       <div
         ref={containerRef}
-        className="h-full w-full overflow-y-auto px-4 md:px-8 py-6 space-y-5 scroll-smooth custom-scrollbar"
+        className="h-full w-full overflow-y-auto overscroll-contain touch-pan-y px-4 md:px-8 py-6 space-y-5 scroll-smooth custom-scrollbar"
       >
         {messages.length === 0 ? (
           /* Hero Section with Quick Action Tool Chips */

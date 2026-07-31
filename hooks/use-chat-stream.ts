@@ -55,6 +55,7 @@ interface UseChatStreamOptions {
   modelId?: string;
   temperature?: number;
   initialMessages?: Message[];
+  onError?: (error: Error) => void;
 }
 
 const STORAGE_KEY = 'fe_07_chat_history_v3';
@@ -70,6 +71,7 @@ export function useChatStream({
   modelId = 'claude-3-5-sonnet',
   temperature = 0.7,
   initialMessages = [],
+  onError,
 }: UseChatStreamOptions = {}) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [status, setStatus] = useState<StreamState>('idle');
@@ -454,9 +456,11 @@ export function useChatStream({
           );
         } else {
           console.error('Streaming error:', err);
-          const msg = err instanceof Error ? err.message : 'Streaming request failed';
+          const errObj = err instanceof Error ? err : new Error('Streaming request failed');
+          const msg = errObj.message;
           setErrorMessage(msg);
           setStatus('error');
+          if (onError) onError(errObj);
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === assistantMessageId

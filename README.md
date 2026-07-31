@@ -96,11 +96,26 @@ Create a `.env.local` file in the project root:
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
 ```
 
-### Running Locally
+### Running Automated Mid-Stream Failure Test
 ```bash
-npm run dev
+npm run test:mid-stream
 ```
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+---
+
+## 📚 Extra Resources & Developer Toolkit
+
+### 1. Chrome DevTools Network Throttling & Request Blocking
+No third-party mocking libraries are required for real-world sabotage testing. Use native Chrome DevTools features built directly into `DevTools → Network`:
+- **Offline / Disconnect**: Set network preset to **"Offline"** before clicking send to verify `<OfflineBanner />` and pre-send error handling.
+- **Network Throttling**: Set preset to **"Slow 3G"** or **"Fast 3G"** to inspect pending `ThinkingSkeleton` animations and zero-CLS transitions.
+- **Request Blocking**: Enable **"Request blocking"** for `/api/chat` to simulate network blockages and route boundary failures.
+
+### 2. Buttons with a Brain Pattern
+The action buttons in this checkpoint (`Send`, `Stop`, and `Retry`) implement production-grade **Buttons with a Brain** micro-interaction state choreography:
+- **Explicit Scope Communication**: The retry button clearly indicates single-message scope (`Scope: Retrying only failed message`).
+- **Double-Click Locking**: Utilizes state lock orchestration (`idle` ➔ `retrying` ➔ `success` ➔ `idle`) to prevent duplicate stream requests if double-clicked.
+- **Contextual Morphing**: Smoothly transitions between `Send` (ArrowUp icon) when idle, `Stop` (Square fill icon) during active streaming, and `Retry` (RefreshCw icon with state choreography) on error.
 
 ---
 
