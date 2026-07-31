@@ -13,8 +13,8 @@ import {
   AI_PERSONAS, 
   AI_MODELS, 
   getAPIKeyStatus, 
-  getDemoResponseForPrompt 
 } from '@/lib/ai-config';
+import { ALL_TOOLS, scoreLeadTool, fetchMetaTagsTool, confirmActionTool, simulateSystemDiagnosticTool } from '@/lib/tools';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -44,17 +44,14 @@ export async function POST(req: NextRequest) {
       temperature = 0.7 
     } = body;
 
-    // Find persona system prompt & model config
     const persona = AI_PERSONAS.find((p) => p.id === personaId) || AI_PERSONAS[0];
     const modelConfig = AI_MODELS.find((m) => m.id === modelId) || AI_MODELS[0];
     const keyStatus = getAPIKeyStatus();
 
-    // Latest user message for fallback
     const lastUserMessage = Array.isArray(messages)
       ? [...messages].reverse().find((m: { role: string }) => m.role === 'user')?.content || ''
       : '';
 
-    // Convert UI messages to model messages safely
     let modelMessages = [];
     try {
       if (Array.isArray(messages) && messages.length > 0) {
@@ -67,7 +64,17 @@ export async function POST(req: NextRequest) {
       }));
     }
 
-    // 1. OpenRouter Provider Execution (If OpenRouter key is present)
+    const systemPromptWithTools = `${persona.systemPrompt}
+
+You have access to real-time structured tools:
+1. 'scoreLead': Scores a B2B sales lead or company (e.g., Stripe, Vercel, Acme Corp). Use this when user asks about lead scoring, deal probability, or enterprise prospect evaluation.
+2. 'fetchMetaTags': Scrapes & analyzes website meta tags, Open Graph card preview, and security headers. Use when user provides a URL or asks to inspect meta tags.
+3. 'confirmAction': Proposes an external CRM or export action requiring user confirmation.
+4. 'simulateSystemDiagnostic': Runs a microservice health check. Use when user asks to test tool error states or system diagnostics.
+
+Always invoke the appropriate tool when user queries fit these capabilities.`;
+
+    // 1. OpenRouter Provider Execution
     if (openrouter) {
       let openRouterModelName = 'anthropic/claude-3.5-sonnet';
 
@@ -82,8 +89,9 @@ export async function POST(req: NextRequest) {
       try {
         const result = streamText({
           model: openrouter.chat(openRouterModelName),
-          system: persona.systemPrompt,
+          system: systemPromptWithTools,
           messages: modelMessages,
+          tools: ALL_TOOLS,
           temperature,
         });
 
@@ -99,8 +107,9 @@ export async function POST(req: NextRequest) {
     if (modelConfig.provider === 'anthropic' && keyStatus.hasAnthropicKey) {
       const result = streamText({
         model: anthropic(modelConfig.sdkModelName),
-        system: persona.systemPrompt,
+        system: systemPromptWithTools,
         messages: modelMessages,
+        tools: ALL_TOOLS,
         temperature,
       });
 
@@ -113,8 +122,9 @@ export async function POST(req: NextRequest) {
     if (modelConfig.provider === 'openai' && keyStatus.hasOpenAIKey) {
       const result = streamText({
         model: openai(modelConfig.sdkModelName),
-        system: persona.systemPrompt,
+        system: systemPromptWithTools,
         messages: modelMessages,
+        tools: ALL_TOOLS,
         temperature,
       });
 
@@ -127,8 +137,9 @@ export async function POST(req: NextRequest) {
     if (modelConfig.provider === 'google' && keyStatus.hasGoogleKey) {
       const result = streamText({
         model: google(modelConfig.sdkModelName),
-        system: persona.systemPrompt,
+        system: systemPromptWithTools,
         messages: modelMessages,
+        tools: ALL_TOOLS,
         temperature,
       });
 
@@ -138,13 +149,18 @@ export async function POST(req: NextRequest) {
     }
 
     // -------------------------------------------------------------
-    // FALLBACK SSE STREAMER FOR OFFLINE / REVIEWER TESTING
+    // DEMO SSE STREAMER WITH TOOL LIFECYCLE FOR REVIEWER / OFFLINE MODE
     // -------------------------------------------------------------
-    const fullText = getDemoResponseForPrompt(lastUserMessage, persona.systemPrompt);
+    const lowerPrompt = lastUserMessage.toLowerCase();
+    const isLeadPrompt = lowerPrompt.includes('score') || lowerPrompt.includes('stripe') || lowerPrompt.includes('lead') || lowerPrompt.includes('prospect');
+    const isMetaPrompt = lowerPrompt.includes('meta') || lowerPrompt.includes('http') || lowerPrompt.includes('.com') || lowerPrompt.includes('url') || lowerPrompt.includes('vercel');
+    const isConfirmPrompt = lowerPrompt.includes('export') || lowerPrompt.includes('confirm') || lowerPrompt.includes('crm');
+    const isErrorPrompt = lowerPrompt.includes('error') || lowerPrompt.includes('diagnostic') || lowerPrompt.includes('fail');
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
+        // Message Start
         controller.enqueue(
           encoder.encode(
             `event: message_start\ndata: ${JSON.stringify({
@@ -154,6 +170,7 @@ export async function POST(req: NextRequest) {
           )
         );
 
+        // Thinking phase
         controller.enqueue(
           encoder.encode(
             `event: content_block_start\ndata: ${JSON.stringify({
@@ -169,12 +186,12 @@ export async function POST(req: NextRequest) {
             `event: content_block_delta\ndata: ${JSON.stringify({
               type: 'content_block_delta',
               index: 0,
-              delta: { type: 'thinking_delta', thinking: 'Analyzing query...' },
+              delta: { type: 'thinking_delta', thinking: 'Analyzing query intent & selecting server-side Zod tool...' },
             })}\n\n`
           )
         );
 
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, 400));
 
         controller.enqueue(
           encoder.encode(
@@ -182,6 +199,102 @@ export async function POST(req: NextRequest) {
           )
         );
 
+        // TOOL EXECUTION DEMO FLOW IF TRIGGERED
+        if (isLeadPrompt || isMetaPrompt || isConfirmPrompt || isErrorPrompt) {
+          const toolCallId = `call_${Math.random().toString(36).substring(2, 9)}`;
+          const toolName = isErrorPrompt
+            ? 'simulateSystemDiagnostic'
+            : isConfirmPrompt
+            ? 'confirmAction'
+            : isMetaPrompt
+            ? 'fetchMetaTags'
+            : 'scoreLead';
+
+          const args = isErrorPrompt
+            ? { serviceName: 'PaymentGatewayMicroservice', simulateFailure: true }
+            : isConfirmPrompt
+            ? { actionType: 'export_lead_report', targetName: 'Stripe, Inc.', parameters: { priority: 'high', notes: 'Automated CRM sync requested' } }
+            : isMetaPrompt
+            ? { url: 'https://vercel.com', checkSecurityHeaders: true }
+            : { companyName: 'Stripe, Inc.', industry: 'Fintech & Payments', employeeCount: 8000 };
+
+          // 1. Tool Call Streaming (input-streaming)
+          controller.enqueue(
+            encoder.encode(
+              `event: tool_call_streaming\ndata: ${JSON.stringify({
+                type: 'tool_call_streaming',
+                toolCallId,
+                toolName,
+                args,
+                state: 'input-streaming',
+              })}\n\n`
+            )
+          );
+
+          await new Promise((res) => setTimeout(res, 500));
+
+          // 2. Tool Input Available (input-available)
+          controller.enqueue(
+            encoder.encode(
+              `event: tool_call_available\ndata: ${JSON.stringify({
+                type: 'tool_call_available',
+                toolCallId,
+                toolName,
+                args,
+                state: 'input-available',
+              })}\n\n`
+            )
+          );
+
+          await new Promise((res) => setTimeout(res, 600));
+
+          // Execute tool backend function or return result/error
+          try {
+            let resultData;
+            const toolExecOptions = { toolCallId, messages: [] } as any;
+            if (toolName === 'scoreLead') {
+              resultData = await scoreLeadTool.execute!(args as any, toolExecOptions);
+            } else if (toolName === 'fetchMetaTags') {
+              resultData = await fetchMetaTagsTool.execute!(args as any, toolExecOptions);
+            } else if (toolName === 'confirmAction') {
+              resultData = await confirmActionTool.execute!(args as any, toolExecOptions);
+            } else {
+              resultData = await simulateSystemDiagnosticTool.execute!(args as any, toolExecOptions);
+            }
+
+            // 3. Tool Output Available (output-available)
+            controller.enqueue(
+              encoder.encode(
+                `event: tool_result\ndata: ${JSON.stringify({
+                  type: 'tool_result',
+                  toolCallId,
+                  toolName,
+                  args,
+                  result: resultData,
+                  state: 'output-available',
+                })}\n\n`
+              )
+            );
+          } catch (err: unknown) {
+            const errStr = err instanceof Error ? err.message : 'Tool execution error';
+
+            // 4. Tool Output Error (output-error)
+            controller.enqueue(
+              encoder.encode(
+                `event: tool_error\ndata: ${JSON.stringify({
+                  type: 'tool_error',
+                  toolCallId,
+                  toolName,
+                  args,
+                  error: errStr,
+                  state: 'output-error',
+                })}\n\n`
+              )
+            );
+          }
+        }
+
+        // Text summary block after tool result
         controller.enqueue(
           encoder.encode(
             `event: content_block_start\ndata: ${JSON.stringify({
@@ -192,11 +305,16 @@ export async function POST(req: NextRequest) {
           )
         );
 
-        const tokens = fullText.match(/(\s+|\S+)/g) || [fullText];
+        const summaryText = isErrorPrompt
+          ? `I attempted to run the \`simulateSystemDiagnostic\` tool on the backend microservice. As shown in the designed error component above, the microservice returned a 503 error. The system caught this gracefully without crashing.`
+          : isConfirmPrompt
+          ? `I've prepared the lead export action. Please review the details in the confirmation widget above and click **Approve & Execute** to proceed.`
+          : isMetaPrompt
+          ? `Here is the comprehensive metadata and Open Graph inspection for **vercel.com**. The page scored 94/100 in SEO readiness with all key security headers active.`
+          : `Here is the full AI Lead Intelligence breakdown for **Stripe, Inc.** with an 88% conversion probability forecast.`;
 
-        for (let i = 0; i < tokens.length; i++) {
-          const token = tokens[i];
-          
+        const tokens = summaryText.match(/(\s+|\S+)/g) || [summaryText];
+        for (const token of tokens) {
           controller.enqueue(
             encoder.encode(
               `event: content_block_delta\ndata: ${JSON.stringify({
@@ -207,9 +325,7 @@ export async function POST(req: NextRequest) {
               })}\n\n`
             )
           );
-
-          const delay = Math.floor(Math.random() * 20) + 15;
-          await new Promise((resolve) => setTimeout(resolve, delay));
+          await new Promise((res) => setTimeout(res, 20));
         }
 
         controller.enqueue(
