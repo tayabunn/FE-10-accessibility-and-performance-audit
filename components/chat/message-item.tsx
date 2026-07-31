@@ -9,6 +9,7 @@ import { WeatherCard } from '../tools/weather-card';
 import { AIPersona } from '@/lib/ai-config';
 import { ConfirmActionInput } from '@/lib/tools';
 import { User, Sparkles, Copy, Check, RotateCcw, AlertTriangle, ExternalLink, Compass } from 'lucide-react';
+import { ChatErrorCard } from './chat-error-card';
 
 interface MessageItemProps {
   message: Message;
@@ -185,10 +186,10 @@ export function MessageItem({
         {(isStreaming || textContent || isStopped || isError) && (
           <div className="relative">
             {isError ? (
-              <div className="flex items-center gap-2 p-3 rounded-lg bg-rose-950/40 border border-rose-800/50 text-rose-300 text-sm">
-                <AlertTriangle className="w-4 h-4 text-rose-400 flex-shrink-0" />
-                <span>{textContent}</span>
-              </div>
+              <ChatErrorCard
+                error={textContent}
+                onRetry={onRegenerate || (() => {})}
+              />
             ) : textContent ? (
               <StreamingMarkdownRenderer
                 content={textContent}

@@ -58,16 +58,40 @@ export async function POST(req: NextRequest) {
       messages = [], 
       personaId = 'mentor', 
       modelId = 'claude-3-5-sonnet', 
-      temperature = 0.7 
+      temperature = 0.7,
+      sabotageMode = null
     } = body;
 
-    const persona = AI_PERSONAS.find((p) => p.id === personaId) || AI_PERSONAS[0];
-    const modelConfig = AI_MODELS.find((m) => m.id === modelId) || AI_MODELS[0];
-    const keyStatus = getAPIKeyStatus();
+    const urlSabotage = req.nextUrl.searchParams.get('sabotage');
+    const activeSabotage = sabotageMode || urlSabotage;
 
     const lastUserMessage = Array.isArray(messages)
       ? [...messages].reverse().find((m: { role: string }) => m.role === 'user')?.content || ''
       : '';
+    const lowerPrompt = lastUserMessage.toLowerCase();
+
+    // Check sabotage triggers from body/query/prompt
+    if (activeSabotage === 'route_500' || lowerPrompt.includes('[sabotage:500]') || lowerPrompt.includes('sabotage 500')) {
+      return NextResponse.json(
+        { error: 'Simulated Route Handler Failure: Internal Server Error (500)' },
+        { status: 500 }
+      );
+    }
+
+    if (activeSabotage === 'rate_limit' || lowerPrompt.includes('[sabotage:429]') || lowerPrompt.includes('sabotage 429')) {
+      return NextResponse.json(
+        { error: 'Simulated Rate Limit: HTTP 429 Too Many Requests. Quota Exceeded.' },
+        { status: 429 }
+      );
+    }
+
+    if (activeSabotage === 'slow_response' || lowerPrompt.includes('[sabotage:slow]') || lowerPrompt.includes('sabotage slow')) {
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+    }
+
+    const persona = AI_PERSONAS.find((p) => p.id === personaId) || AI_PERSONAS[0];
+    const modelConfig = AI_MODELS.find((m) => m.id === modelId) || AI_MODELS[0];
+    const keyStatus = getAPIKeyStatus();
 
     let modelMessages: any[] = [];
     try {
@@ -171,7 +195,6 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
     // -------------------------------------------------------------
     // DEMO / OFFLINE SSE STREAMER WITH TOOL LIFECYCLE FOR PREVIEW MODE
     // -------------------------------------------------------------
-    const lowerPrompt = lastUserMessage.toLowerCase();
     const isLeadPrompt = lowerPrompt.includes('score') || lowerPrompt.includes('stripe') || lowerPrompt.includes('lead') || lowerPrompt.includes('prospect');
     const isMetaPrompt = lowerPrompt.includes('meta') || lowerPrompt.includes('http') || lowerPrompt.includes('.com') || lowerPrompt.includes('url') || lowerPrompt.includes('vercel');
     const isConfirmPrompt = lowerPrompt.includes('export') || lowerPrompt.includes('confirm') || lowerPrompt.includes('crm');
@@ -183,6 +206,18 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
     const encoder = new TextEncoder();
     const demoStream = new ReadableStream({
       async start(controller) {
+        // Check mid-stream sabotage
+        if (activeSabotage === 'mid_stream' || lowerPrompt.includes('mid_stream') || lowerPrompt.includes('sabotage stream')) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({ type: 'text-delta', delta: { type: 'text_delta', text: 'Streaming started... ' } })}\n\n`
+            )
+          );
+          await new Promise((r) => setTimeout(r, 400));
+          controller.error(new Error('Simulated Stream Aborted Mid-Transmission: Network connection killed.'));
+          return;
+        }
+
         // Stream message_start
         controller.enqueue(
           encoder.encode(

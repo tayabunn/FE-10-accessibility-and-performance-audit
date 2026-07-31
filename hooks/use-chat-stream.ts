@@ -192,7 +192,12 @@ export function useChatStream({
   }, [addNotification]);
 
   const sendMessage = useCallback(
-    async (inputPayload: string | { text: string }, overridePersonaId?: string, overrideModelId?: string) => {
+    async (
+      inputPayload: string | { text: string },
+      overridePersonaId?: string,
+      overrideModelId?: string,
+      sabotageMode?: string
+    ) => {
       const contentText = typeof inputPayload === 'string' ? inputPayload : inputPayload.text;
       if (!contentText.trim() || status === 'thinking' || status === 'streaming') return;
 
@@ -238,11 +243,19 @@ export function useChatStream({
             personaId: overridePersonaId || personaId,
             modelId: overrideModelId || modelId,
             temperature,
+            sabotageMode,
           }),
         });
 
         if (!response.ok) {
-          throw new Error(`Server returned status ${response.status}`);
+          let errDetail = `Server returned status ${response.status}`;
+          try {
+            const errJson = await response.json();
+            if (errJson?.error) errDetail = errJson.error;
+          } catch {
+            // fallback
+          }
+          throw new Error(errDetail);
         }
 
         if (!response.body) {
@@ -530,10 +543,13 @@ export function useChatStream({
     messages,
     status,
     errorMessage,
+    error: errorMessage ? new Error(errorMessage) : null,
     notifications,
     sendMessage,
     stop,
     regenerate,
+    reload: regenerate,
+    retry: regenerate,
     clearMessages,
     handleConfirmAction,
     handleRetryTool,
