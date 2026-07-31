@@ -100,13 +100,36 @@ export function ChatInput({ onSend, onStop, status, disabled }: ChatInputProps) 
 
         {/* Action Controls & Footer Buttons */}
         <div className="flex items-center justify-between p-3 border-t border-purple-900/40">
-          <button
-            type="button"
-            className="p-2 rounded-lg text-purple-300/70 hover:text-white hover:bg-purple-950/60 transition-colors"
-            title="Attach File"
-          >
-            <Paperclip className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className="p-2 rounded-lg text-purple-300/70 hover:text-white hover:bg-purple-950/60 transition-colors"
+              title="Attach File"
+            >
+              <Paperclip className="w-4 h-4" />
+            </button>
+
+            {/* Prompt Character Counter & Overflow Warning Badge */}
+            {message.length > 0 && (
+              <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                <span
+                  className={cn(
+                    'px-2 py-0.5 rounded-full border transition-colors',
+                    message.length > 3800
+                      ? 'bg-rose-950/80 text-rose-300 border-rose-700/60 animate-pulse'
+                      : message.length > 3000
+                      ? 'bg-amber-950/80 text-amber-300 border-amber-700/60'
+                      : 'bg-purple-950/60 text-purple-400 border-purple-800/40'
+                  )}
+                >
+                  {message.length} / 4000 chars
+                </span>
+                {message.length > 3800 && (
+                  <span className="text-rose-400 font-bold">Approaching Limit</span>
+                )}
+              </div>
+            )}
+          </div>
 
           <div className="flex items-center gap-2">
             <AnimatePresence mode="wait">
