@@ -131,7 +131,7 @@ export function EmptyStateCard({
                 {item.label}
               </h4>
               <p className="text-[11px] text-purple-300/70 mt-1 line-clamp-2 leading-relaxed font-mono">
-                "{item.prompt}"
+                &quot;{item.prompt}&quot;
               </p>
             </div>
             <div className="flex items-center justify-end mt-3 text-purple-400 group-hover:text-purple-300 transition-colors text-xs font-semibold">

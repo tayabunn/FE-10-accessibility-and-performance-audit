@@ -93,16 +93,16 @@ export async function POST(req: NextRequest) {
     const modelConfig = AI_MODELS.find((m) => m.id === modelId) || AI_MODELS[0];
     const keyStatus = getAPIKeyStatus();
 
-    let modelMessages: any[] = [];
+    let modelMessages: Awaited<ReturnType<typeof convertToModelMessages>> = [];
     try {
       if (Array.isArray(messages) && messages.length > 0) {
         modelMessages = await convertToModelMessages(messages as UIMessage[]);
       }
     } catch {
       modelMessages = messages.map((m: { role: string; content: string }) => ({
-        role: m.role,
+        role: m.role as 'user' | 'assistant',
         content: m.content,
-      }));
+      })) as Awaited<ReturnType<typeof convertToModelMessages>>;
     }
 
     const systemPromptWithTools = `${persona.systemPrompt}
@@ -352,7 +352,7 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
             )
           );
           await new Promise((res) => setTimeout(res, 500));
-          const weatherResult = await getWeatherInformationTool.execute!(args, { toolCallId, messages: [] } as any);
+          const weatherResult = await getWeatherInformationTool.execute!(args, { toolCallId, messages: [] } as unknown as Parameters<NonNullable<typeof getWeatherInformationTool.execute>>[1]);
           controller.enqueue(
             encoder.encode(
               `event: tool_result\ndata: ${JSON.stringify({
@@ -412,15 +412,15 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
 
           try {
             let resultData;
-            const toolExecOptions = { toolCallId, messages: [] } as any;
+            const toolExecOptions = { toolCallId, messages: [] } as unknown as Parameters<NonNullable<typeof scoreLeadTool.execute>>[1];
             if (toolName === 'scoreLead') {
-              resultData = await scoreLeadTool.execute!(args as any, toolExecOptions);
+              resultData = await scoreLeadTool.execute!(args as unknown as Parameters<typeof scoreLeadTool.execute>[0], toolExecOptions);
             } else if (toolName === 'fetchMetaTags') {
-              resultData = await fetchMetaTagsTool.execute!(args as any, toolExecOptions);
+              resultData = await fetchMetaTagsTool.execute!(args as unknown as Parameters<typeof fetchMetaTagsTool.execute>[0], toolExecOptions);
             } else if (toolName === 'confirmAction') {
-              resultData = await confirmActionTool.execute!(args as any, toolExecOptions);
+              resultData = await confirmActionTool.execute!(args as unknown as Parameters<typeof confirmActionTool.execute>[0], toolExecOptions);
             } else {
-              resultData = await simulateSystemDiagnosticTool.execute!(args as any, toolExecOptions);
+              resultData = await simulateSystemDiagnosticTool.execute!(args as unknown as Parameters<typeof simulateSystemDiagnosticTool.execute>[0], toolExecOptions);
             }
 
             controller.enqueue(

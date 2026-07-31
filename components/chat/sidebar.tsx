@@ -18,8 +18,10 @@ import {
   X, 
   Layers,
   Sparkles,
-  ExternalLink
+  ExternalLink,
+  Settings
 } from 'lucide-react';
+import Link from 'next/link';
 
 interface SidebarProps {
   selectedPersona: AIPersona;
@@ -225,8 +227,16 @@ export function Sidebar({
               </div>
             </div>
 
-            {/* Clear History & Footer */}
-            <div className="pt-4 border-t border-purple-900/30 space-y-3">
+            {/* Clear History, Settings & Footer */}
+            <div className="pt-4 border-t border-purple-900/30 space-y-2">
+              <Link
+                href="/settings"
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-purple-950/50 hover:bg-purple-900/60 text-purple-200 hover:text-white border border-purple-800/50 text-xs font-semibold transition-all"
+              >
+                <Settings className="w-3.5 h-3.5 text-purple-400" />
+                <span>Profile & Creator Settings</span>
+              </Link>
+
               <button
                 onClick={onClearHistory}
                 className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-purple-950/30 hover:bg-rose-950/50 text-slate-400 hover:text-rose-300 border border-purple-900/40 hover:border-rose-800/60 text-xs font-semibold transition-all"

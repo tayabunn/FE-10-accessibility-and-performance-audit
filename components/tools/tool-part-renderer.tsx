@@ -317,11 +317,11 @@ export function ToolPartRenderer({
               <MetaTagsCard data={toolResult as MetaTagsResult} />
             ) : toolName === 'getWeatherInformation' && toolResult ? (
               <WeatherCard
-                city={(toolResult as any).city || (args?.city as string) || 'San Francisco'}
-                weather={(toolResult as any).weather}
-                temperature={(toolResult as any).temperature}
-                humidity={(toolResult as any).humidity}
-                windSpeed={(toolResult as any).windSpeed}
+                city={((toolResult as Record<string, unknown>).city as string) || (args?.city as string) || 'San Francisco'}
+                weather={((toolResult as Record<string, unknown>).weather as string) || 'sunny'}
+                temperature={String((toolResult as Record<string, unknown>).temperature ?? '72°F')}
+                humidity={String((toolResult as Record<string, unknown>).humidity ?? '48%')}
+                windSpeed={String((toolResult as Record<string, unknown>).windSpeed ?? '10 mph')}
                 status="success"
               />
             ) : toolName === 'confirmAction' ? (

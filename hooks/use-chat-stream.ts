@@ -1,8 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useChat as useVercelChat } from '@ai-sdk/react';
-import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai';
+import { DefaultChatTransport } from 'ai';
 import { ConfirmActionInput, ConfirmActionResult } from '@/lib/tools';
-import type { MyUIMessage } from '@/ai/types';
 
 export type ToolState = 
   | 'input-streaming' 
@@ -73,7 +72,22 @@ export function useChatStream({
   initialMessages = [],
   onError,
 }: UseChatStreamOptions = {}) {
-  const [messages, setMessages] = useState<Message[]>(initialMessages);
+  const [messages, setMessages] = useState<Message[]>(() => {
+    if (typeof window !== 'undefined' && initialMessages.length === 0) {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed;
+          }
+        }
+      } catch {
+        // Ignore
+      }
+    }
+    return initialMessages;
+  });
   const [status, setStatus] = useState<StreamState>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<ToastNotification[]>([]);
@@ -81,26 +95,12 @@ export function useChatStream({
   const abortControllerRef = useRef<AbortController | null>(null);
   const startTimeRef = useRef<number>(0);
 
-  const transport = useRef(
-    new DefaultChatTransport({
-      api: '/api/chat',
-    })
-  ).current;
-
-  // Load history from localStorage
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved && initialMessages.length === 0) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setMessages(parsed);
-        }
-      }
-    } catch {
-      // Ignore
-    }
-  }, [initialMessages.length]);
+  const [transport] = useState(
+    () =>
+      new DefaultChatTransport({
+        api: '/api/chat',
+      })
+  );
 
   // Persist history
   useEffect(() => {
