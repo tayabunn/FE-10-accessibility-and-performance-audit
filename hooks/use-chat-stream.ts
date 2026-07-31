@@ -1,11 +1,23 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useChat as useVercelChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
+import { ConfirmActionInput, ConfirmActionResult } from '@/lib/tools';
 
-export interface MessagePart {
-  type: 'text';
-  text: string;
+export type ToolState = 'input-streaming' | 'input-available' | 'output-available' | 'output-error';
+
+export interface ToolInvocationPart {
+  type: 'tool-invocation';
+  toolCallId: string;
+  toolName: string;
+  args?: Record<string, unknown>;
+  state: ToolState;
+  result?: unknown;
+  error?: string;
 }
+
+export type MessagePart =
+  | { type: 'text'; text: string }
+  | ToolInvocationPart;
 
 export interface Message {
   id: string;
@@ -26,7 +38,7 @@ interface UseChatStreamOptions {
   initialMessages?: Message[];
 }
 
-const STORAGE_KEY = 'fe_06_chat_history_v1';
+const STORAGE_KEY = 'fe_07_chat_history_v2';
 
 export function useChatStream({
   personaId = 'mentor',
@@ -41,14 +53,13 @@ export function useChatStream({
   const abortControllerRef = useRef<AbortController | null>(null);
   const startTimeRef = useRef<number>(0);
 
-  // Vercel AI SDK Transport setup
   const transport = useRef(
     new DefaultChatTransport({
       api: '/api/chat',
     })
   ).current;
 
-  // Load from localStorage on mount if no initial messages
+  // Load history from localStorage
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -59,22 +70,21 @@ export function useChatStream({
         }
       }
     } catch {
-      // Ignore localStorage errors
+      // Ignore
     }
   }, [initialMessages.length]);
 
-  // Persist messages to localStorage
+  // Persist history
   useEffect(() => {
     try {
       if (messages.length > 0) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
       }
     } catch {
-      // Ignore localStorage errors
+      // Ignore
     }
   }, [messages]);
 
-  // Stop current streaming generation
   const stop = useCallback(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -90,7 +100,6 @@ export function useChatStream({
     );
   }, []);
 
-  // Send a message and stream response
   const sendMessage = useCallback(
     async (inputPayload: string | { text: string }, overridePersonaId?: string, overrideModelId?: string) => {
       const contentText = typeof inputPayload === 'string' ? inputPayload : inputPayload.text;
@@ -113,7 +122,7 @@ export function useChatStream({
         id: assistantMessageId,
         role: 'assistant',
         content: '',
-        parts: [{ type: 'text', text: '' }],
+        parts: [],
         createdAt: timestamp,
         status: 'thinking',
       };
@@ -122,7 +131,6 @@ export function useChatStream({
       setStatus('thinking');
       startTimeRef.current = Date.now();
 
-      // Create new AbortController
       const controller = new AbortController();
       abortControllerRef.current = controller;
 
@@ -152,7 +160,8 @@ export function useChatStream({
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder('utf-8');
-        let accumulatedContent = '';
+        let accumulatedText = '';
+        const toolPartsMap: Record<string, ToolInvocationPart> = {};
         let hasStartedStreaming = false;
 
         let buffer = '';
@@ -168,7 +177,6 @@ export function useChatStream({
             const trimmed = line.trim();
             if (!trimmed) continue;
 
-            // Extract SSE event lines
             const dataLine = trimmed.split('\n').find((l) => l.startsWith('data: '));
             if (!dataLine) continue;
 
@@ -178,54 +186,56 @@ export function useChatStream({
             try {
               const data = JSON.parse(jsonStr);
 
-              // Anthropic Spec: thinking_delta
-              if (
-                data.type === 'thinking' ||
-                data.delta?.type === 'thinking_delta'
-              ) {
-                continue;
+              // 1. Tool Event: tool_call_streaming
+              if (data.type === 'tool_call_streaming' || data.type === 'tool-call-streaming') {
+                toolPartsMap[data.toolCallId] = {
+                  type: 'tool-invocation',
+                  toolCallId: data.toolCallId,
+                  toolName: data.toolName,
+                  args: data.args || {},
+                  state: 'input-streaming',
+                };
+              }
+              // 2. Tool Event: tool_call_available
+              else if (data.type === 'tool_call_available' || data.type === 'tool-call') {
+                toolPartsMap[data.toolCallId] = {
+                  type: 'tool-invocation',
+                  toolCallId: data.toolCallId,
+                  toolName: data.toolName,
+                  args: data.args || {},
+                  state: 'input-available',
+                };
+              }
+              // 3. Tool Event: tool_result
+              else if (data.type === 'tool_result' || data.type === 'tool-result') {
+                toolPartsMap[data.toolCallId] = {
+                  type: 'tool-invocation',
+                  toolCallId: data.toolCallId,
+                  toolName: data.toolName,
+                  args: data.args || {},
+                  state: 'output-available',
+                  result: data.result,
+                };
+              }
+              // 4. Tool Event: tool_error
+              else if (data.type === 'tool_error' || data.type === 'tool-error') {
+                toolPartsMap[data.toolCallId] = {
+                  type: 'tool-invocation',
+                  toolCallId: data.toolCallId,
+                  toolName: data.toolName,
+                  args: data.args || {},
+                  state: 'output-error',
+                  error: data.error || 'Tool execution encountered an error.',
+                };
               }
 
-              // Anthropic Spec: text_delta or token event
+              // Text deltas
               const tokenText = data.delta?.type === 'text_delta' ? data.delta.text : data.content;
-
               if (tokenText) {
-                if (!hasStartedStreaming) {
-                  hasStartedStreaming = true;
-                  const thinkingTime = Date.now() - startTimeRef.current;
-                  setStatus('streaming');
-
-                  setMessages((prev) =>
-                    prev.map((msg) =>
-                      msg.id === assistantMessageId
-                        ? { ...msg, status: 'streaming', thinkingTimeMs: thinkingTime }
-                        : msg
-                    )
-                  );
-                }
-
-                accumulatedContent += tokenText;
-
-                setMessages((prev) =>
-                  prev.map((msg) =>
-                    msg.id === assistantMessageId
-                      ? {
-                          ...msg,
-                          content: accumulatedContent,
-                          parts: [{ type: 'text', text: accumulatedContent }],
-                        }
-                      : msg
-                  )
-                );
+                accumulatedText += tokenText;
               }
 
-              // Anthropic Spec: message_stop or finish signal
-              if (data.type === 'finish' || data.type === 'message_stop') {
-                break;
-              }
-            } catch {
-              // Direct AI SDK text stream chunk fallback
-              if (!hasStartedStreaming && jsonStr) {
+              if (!hasStartedStreaming && (tokenText || Object.keys(toolPartsMap).length > 0)) {
                 hasStartedStreaming = true;
                 const thinkingTime = Date.now() - startTimeRef.current;
                 setStatus('streaming');
@@ -237,23 +247,48 @@ export function useChatStream({
                   )
                 );
               }
-              accumulatedContent += jsonStr;
+
+              // Update assistant message parts
+              const currentParts: MessagePart[] = [
+                ...Object.values(toolPartsMap),
+                ...(accumulatedText ? [{ type: 'text' as const, text: accumulatedText }] : []),
+              ];
+
               setMessages((prev) =>
                 prev.map((msg) =>
                   msg.id === assistantMessageId
                     ? {
                         ...msg,
-                        content: accumulatedContent,
-                        parts: [{ type: 'text', text: accumulatedContent }],
+                        content: accumulatedText,
+                        parts: currentParts,
                       }
                     : msg
                 )
               );
+
+              if (data.type === 'finish' || data.type === 'message_stop') {
+                break;
+              }
+            } catch {
+              // Direct string text chunk fallback
+              if (jsonStr) {
+                accumulatedText += jsonStr;
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === assistantMessageId
+                      ? {
+                          ...msg,
+                          content: accumulatedText,
+                          parts: [...Object.values(toolPartsMap), { type: 'text', text: accumulatedText }],
+                        }
+                      : msg
+                  )
+                );
+              }
             }
           }
         }
 
-        // Completion
         setStatus('idle');
         setMessages((prev) =>
           prev.map((msg) =>
@@ -297,7 +332,40 @@ export function useChatStream({
     [messages, personaId, modelId, temperature, status]
   );
 
-  // Regenerate last assistant response
+  // Client-side confirmation handler for user-interaction tool
+  const handleConfirmAction = useCallback(async (input: ConfirmActionInput) => {
+    // Find latest assistant message with confirmAction tool part
+    setMessages((prev) =>
+      prev.map((msg) => {
+        if (msg.role !== 'assistant') return msg;
+        const updatedParts = msg.parts.map((p) => {
+          if (p.type === 'tool-invocation' && p.toolName === 'confirmAction') {
+            const mockResult: ConfirmActionResult = {
+              actionType: input.actionType,
+              targetName: input.targetName,
+              status: 'executed',
+              transactionId: `TX-${Math.floor(100000 + Math.random() * 900000)}`,
+              executedAt: new Date().toISOString(),
+              summary: `Report export executed successfully for ${input.targetName}. Report delivered to workspace analytics dashboard.`,
+            };
+            return {
+              ...p,
+              state: 'output-available' as const,
+              result: mockResult,
+            };
+          }
+          return p;
+        });
+        return { ...msg, parts: updatedParts };
+      })
+    );
+  }, []);
+
+  // Client-side retry handler for tool error state
+  const handleRetryTool = useCallback((toolName: string, args?: Record<string, unknown>) => {
+    sendMessage(`Retry tool execution for ${toolName} with parameters: ${JSON.stringify(args || {})}`);
+  }, [sendMessage]);
+
   const regenerate = useCallback(() => {
     if (messages.length === 0) return;
     const lastMsg = messages[messages.length - 1];
@@ -316,7 +384,6 @@ export function useChatStream({
     }
   }, [messages, sendMessage]);
 
-  // Clear chat thread
   const clearMessages = useCallback(() => {
     stop();
     setMessages([]);
@@ -337,6 +404,8 @@ export function useChatStream({
     stop,
     regenerate,
     clearMessages,
+    handleConfirmAction,
+    handleRetryTool,
     setMessages,
     transport,
   };
