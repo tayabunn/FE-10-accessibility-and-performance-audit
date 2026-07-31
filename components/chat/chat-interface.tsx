@@ -20,6 +20,8 @@ export function ChatInterface() {
     stop,
     regenerate,
     clearMessages,
+    handleConfirmAction,
+    handleRetryTool,
   } = useChatStream({
     personaId: selectedPersona.id,
     modelId: selectedModel.id,
@@ -102,6 +104,8 @@ export function ChatInterface() {
           status={status}
           onRegenerate={regenerate}
           onSelectPrompt={handleSelectPrompt}
+          onConfirmAction={handleConfirmAction}
+          onRetryTool={handleRetryTool}
         />
 
         {/* Multiline Input & Quick Action Chips */}

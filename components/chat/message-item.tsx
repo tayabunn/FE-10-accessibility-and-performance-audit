@@ -2,9 +2,11 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Message } from '@/hooks/use-chat-stream';
+import { Message, ToolInvocationPart } from '@/hooks/use-chat-stream';
 import { StreamingMarkdownRenderer } from './markdown-renderer';
+import { ToolPartRenderer } from '../tools/tool-part-renderer';
 import { AIPersona } from '@/lib/ai-config';
+import { ConfirmActionInput } from '@/lib/tools';
 import { User, Sparkles, Copy, Check, RotateCcw, AlertTriangle } from 'lucide-react';
 
 interface MessageItemProps {
@@ -12,6 +14,8 @@ interface MessageItemProps {
   persona: AIPersona;
   isLastAssistant?: boolean;
   onRegenerate?: () => void;
+  onConfirmAction?: (input: ConfirmActionInput) => Promise<void>;
+  onRetryTool?: (toolName: string, args?: Record<string, unknown>) => void;
 }
 
 export function MessageItem({
@@ -19,6 +23,8 @@ export function MessageItem({
   persona,
   isLastAssistant,
   onRegenerate,
+  onConfirmAction,
+  onRetryTool,
 }: MessageItemProps) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === 'user';
@@ -27,11 +33,16 @@ export function MessageItem({
   const isStopped = message.status === 'stopped';
   const isError = message.status === 'error';
 
-  // Extract text from typed message parts (Vercel AI SDK pattern) or content string
+  // Separate tool invocation parts from markdown text content
+  const toolParts = (message.parts || []).filter(
+    (p): p is ToolInvocationPart => p.type === 'tool-invocation'
+  );
+
   const textContent =
-    message.parts && message.parts.length > 0
-      ? message.parts.map((p) => (p.type === 'text' ? p.text : '')).join('')
-      : message.content;
+    (message.parts || [])
+      .filter((p) => p.type === 'text')
+      .map((p) => (p as { type: 'text'; text: string }).text)
+      .join('') || message.content;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(textContent);
@@ -66,7 +77,7 @@ export function MessageItem({
       </div>
 
       {/* Content Body */}
-      <div className="flex-1 min-w-0 space-y-2">
+      <div className="flex-1 min-w-0 space-y-3">
         {/* Header line */}
         <div className="flex items-center justify-between text-xs text-slate-400">
           <div className="flex items-center gap-2">
@@ -94,9 +105,9 @@ export function MessageItem({
           </span>
         </div>
 
-        {/* Seamless Thinking to Token Handoff Transition */}
+        {/* Thinking State */}
         <AnimatePresence mode="wait">
-          {isThinking && (
+          {isThinking && toolParts.length === 0 && !textContent && (
             <motion.div
               key="thinking-state"
               initial={{ opacity: 0, scale: 0.98 }}
@@ -109,40 +120,48 @@ export function MessageItem({
                 <span className="absolute w-2 h-2 rounded-full bg-purple-400 animate-ping opacity-75" />
               </div>
               <span className="font-medium tracking-wide">
-                Thinking and preparing response stream...
+                Thinking & selecting tool schema...
               </span>
-            </motion.div>
-          )}
-
-          {(isStreaming || textContent || isStopped || isError) && (
-            <motion.div
-              key="content-state"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.2 }}
-              className="relative"
-            >
-              {isError ? (
-                <div className="flex items-center gap-2 p-3 rounded-lg bg-rose-950/40 border border-rose-800/50 text-rose-300 text-sm">
-                  <AlertTriangle className="w-4 h-4 text-rose-400 flex-shrink-0" />
-                  <span>{textContent}</span>
-                </div>
-              ) : (
-                <StreamingMarkdownRenderer
-                  content={textContent}
-                  isStreaming={isStreaming}
-                />
-              )}
-
-              {/* Live Streaming Token Indicator Cursor */}
-              {isStreaming && (
-                <span className="inline-block w-2 h-4 ml-1 bg-purple-400 rounded-sm animate-pulse align-middle" />
-              )}
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Message Action Bar */}
+        {/* Render Structured Tool Invocation Parts */}
+        {toolParts.length > 0 && (
+          <div className="space-y-3 my-2">
+            {toolParts.map((part) => (
+              <ToolPartRenderer
+                key={part.toolCallId}
+                toolPart={part}
+                onConfirmAction={onConfirmAction}
+                onRetryTool={onRetryTool}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Render Markdown Text Content */}
+        {(isStreaming || textContent || isStopped || isError) && (
+          <div className="relative">
+            {isError ? (
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-rose-950/40 border border-rose-800/50 text-rose-300 text-sm">
+                <AlertTriangle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+                <span>{textContent}</span>
+              </div>
+            ) : textContent ? (
+              <StreamingMarkdownRenderer
+                content={textContent}
+                isStreaming={isStreaming}
+              />
+            ) : null}
+
+            {isStreaming && (
+              <span className="inline-block w-2 h-4 ml-1 bg-purple-400 rounded-sm animate-pulse align-middle" />
+            )}
+          </div>
+        )}
+
+        {/* Action Bar */}
         {!isThinking && textContent && (
           <div className="flex items-center gap-1 pt-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
