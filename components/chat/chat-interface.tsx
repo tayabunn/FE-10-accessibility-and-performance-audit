@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useChatStream } from '@/hooks/use-chat-stream';
 import { MessageList } from './message-list';
 import { ChatInput } from './chat-input';
 import { Sidebar } from './sidebar';
 import { AI_PERSONAS, AI_MODELS, AIPersona, AIModelConfig } from '@/lib/ai-config';
-import { PanelLeft, RefreshCw, Sparkles } from 'lucide-react';
+import { PanelLeft, RefreshCw, Sparkles, Bell } from 'lucide-react';
 
 export function ChatInterface() {
   const [selectedPersona, setSelectedPersona] = useState<AIPersona>(AI_PERSONAS[0]);
@@ -16,12 +17,15 @@ export function ChatInterface() {
   const {
     messages,
     status,
+    notifications,
     sendMessage,
     stop,
     regenerate,
     clearMessages,
     handleConfirmAction,
     handleRetryTool,
+    addToolOutput,
+    addToolApprovalResponse,
   } = useChatStream({
     personaId: selectedPersona.id,
     modelId: selectedModel.id,
@@ -36,6 +40,29 @@ export function ChatInterface() {
       {/* Radial Purple Glow Background Orbs */}
       <div className="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[800px] h-[500px] bg-gradient-to-b from-purple-600/20 via-indigo-600/10 to-transparent blur-[120px] pointer-events-none z-0" />
       <div className="absolute bottom-[-10%] right-[-5%] w-[600px] h-[400px] bg-gradient-to-t from-violet-600/15 via-purple-900/10 to-transparent blur-[100px] pointer-events-none z-0" />
+
+      {/* Floating Toast Notification Stack (Transient Data Parts Streamed via onData) */}
+      <div className="fixed top-16 right-6 z-50 flex flex-col gap-2 pointer-events-none max-w-sm">
+        <AnimatePresence>
+          {notifications.map((toast) => (
+            <motion.div
+              key={toast.id}
+              initial={{ opacity: 0, x: 20, scale: 0.95 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 20, scale: 0.95 }}
+              className="p-3 rounded-xl bg-purple-950/90 border border-purple-700/60 shadow-2xl backdrop-blur-xl text-xs text-purple-200 flex items-center gap-2.5 pointer-events-auto"
+            >
+              <div className="w-6 h-6 rounded-lg bg-purple-900/80 flex items-center justify-center text-purple-300 flex-shrink-0">
+                <Bell className="w-3.5 h-3.5 text-purple-400 animate-bounce" />
+              </div>
+              <div className="min-w-0">
+                <span className="font-bold text-white block text-[11px] font-mono">Stream Telemetry</span>
+                <span className="truncate block text-purple-200">{toast.message}</span>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
 
       {/* Sidebar Drawer */}
       <Sidebar
@@ -105,6 +132,8 @@ export function ChatInterface() {
           onRegenerate={regenerate}
           onSelectPrompt={handleSelectPrompt}
           onConfirmAction={handleConfirmAction}
+          onAddToolOutput={addToolOutput}
+          onAddToolApprovalResponse={addToolApprovalResponse}
           onRetryTool={handleRetryTool}
         />
 

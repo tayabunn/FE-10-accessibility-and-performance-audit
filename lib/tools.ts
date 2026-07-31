@@ -152,7 +152,7 @@ export const fetchMetaTagsTool = tool({
 });
 
 // ============================================================================
-// 3. INTERACTIVE CONFIRMATION ACTION TOOL
+// 3. INTERACTIVE CONFIRMATION ACTION TOOL (Server-side proposal)
 // ============================================================================
 
 export const confirmActionSchema = z.object({
@@ -223,10 +223,62 @@ export const simulateSystemDiagnosticTool = tool({
   },
 });
 
+// ============================================================================
+// 5. SERVER-SIDE TOOL: getWeatherInformation
+// ============================================================================
+
+export const getWeatherInformationSchema = z.object({
+  city: z.string().describe('The city to get weather information for'),
+});
+
+export const getWeatherInformationTool = tool({
+  description: 'Show the weather in a given city to the user.',
+  inputSchema: getWeatherInformationSchema,
+  execute: async ({ city }: { city: string }) => {
+    await new Promise((res) => setTimeout(res, 500));
+    const weatherOptions = ['sunny', 'cloudy', 'rainy', 'snowy', 'windy'];
+    const chosen = weatherOptions[Math.floor(Math.random() * weatherOptions.length)];
+    return {
+      city,
+      weather: chosen,
+      temperature: chosen === 'snowy' ? '32°F' : chosen === 'sunny' ? '78°F' : '65°F',
+      humidity: '55%',
+      windSpeed: '12 mph',
+    };
+  },
+});
+
+// ============================================================================
+// 6. CLIENT-SIDE TOOL: askForConfirmation
+// ============================================================================
+
+export const askForConfirmationSchema = z.object({
+  message: z.string().describe('The message to ask the user for confirmation.'),
+});
+
+export const askForConfirmationTool = tool({
+  description: 'Ask the user for confirmation on the client side.',
+  inputSchema: askForConfirmationSchema,
+});
+
+// ============================================================================
+// 7. CLIENT-SIDE TOOL: getLocation (Auto Executed Client Tool)
+// ============================================================================
+
+export const getLocationSchema = z.object({});
+
+export const getLocationTool = tool({
+  description: 'Get the user location. Always ask for confirmation before using this tool.',
+  inputSchema: getLocationSchema,
+});
+
 // Map of all tools exported for model binding
 export const ALL_TOOLS = {
   scoreLead: scoreLeadTool,
   fetchMetaTags: fetchMetaTagsTool,
   confirmAction: confirmActionTool,
   simulateSystemDiagnostic: simulateSystemDiagnosticTool,
+  getWeatherInformation: getWeatherInformationTool,
+  askForConfirmation: askForConfirmationTool,
+  getLocation: getLocationTool,
 };

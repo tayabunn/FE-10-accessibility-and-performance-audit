@@ -1,22 +1,41 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useChat as useVercelChat } from '@ai-sdk/react';
-import { DefaultChatTransport } from 'ai';
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls } from 'ai';
 import { ConfirmActionInput, ConfirmActionResult } from '@/lib/tools';
+import type { MyUIMessage } from '@/ai/types';
 
-export type ToolState = 'input-streaming' | 'input-available' | 'output-available' | 'output-error';
+export type ToolState = 
+  | 'input-streaming' 
+  | 'input-available' 
+  | 'approval-requested' 
+  | 'approval-responded' 
+  | 'output-available' 
+  | 'output-error' 
+  | 'output-denied';
 
 export interface ToolInvocationPart {
-  type: 'tool-invocation';
+  type: 'tool-invocation' | 'dynamic-tool';
   toolCallId: string;
   toolName: string;
   args?: Record<string, unknown>;
   state: ToolState;
   result?: unknown;
+  output?: unknown;
   error?: string;
+  errorText?: string;
+  approval?: {
+    id?: string;
+    approved?: boolean;
+    isAutomatic?: boolean;
+    reason?: string;
+  };
 }
 
 export type MessagePart =
   | { type: 'text'; text: string }
+  | { type: 'step-start' }
+  | { type: 'source'; url: string; title: string }
+  | { type: 'data-weather'; id?: string; data: { city: string; weather?: string; status: 'loading' | 'success' } }
   | ToolInvocationPart;
 
 export interface Message {
@@ -38,7 +57,13 @@ interface UseChatStreamOptions {
   initialMessages?: Message[];
 }
 
-const STORAGE_KEY = 'fe_07_chat_history_v2';
+const STORAGE_KEY = 'fe_07_chat_history_v3';
+
+export interface ToastNotification {
+  id: string;
+  message: string;
+  level: 'info' | 'warning' | 'error';
+}
 
 export function useChatStream({
   personaId = 'mentor',
@@ -49,6 +74,7 @@ export function useChatStream({
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [status, setStatus] = useState<StreamState>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<ToastNotification[]>([]);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const startTimeRef = useRef<number>(0);
@@ -85,6 +111,14 @@ export function useChatStream({
     }
   }, [messages]);
 
+  const addNotification = useCallback((msg: string, level: 'info' | 'warning' | 'error' = 'info') => {
+    const id = `toast_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`;
+    setNotifications((prev) => [...prev, { id, message: msg, level }]);
+    setTimeout(() => {
+      setNotifications((prev) => prev.filter((n) => n.id !== id));
+    }, 4000);
+  }, []);
+
   const stop = useCallback(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -99,6 +133,63 @@ export function useChatStream({
       )
     );
   }, []);
+
+  const addToolOutput = useCallback(({
+    tool,
+    toolCallId,
+    output,
+    state = 'output-available',
+    errorText,
+  }: {
+    tool: string;
+    toolCallId: string;
+    output?: unknown;
+    state?: 'output-available' | 'output-error';
+    errorText?: string;
+  }) => {
+    setMessages((prev) =>
+      prev.map((msg) => {
+        if (msg.role !== 'assistant') return msg;
+        const updatedParts = msg.parts.map((p) => {
+          if (p.type === 'tool-invocation' && p.toolCallId === toolCallId) {
+            return {
+              ...p,
+              state: state as ToolState,
+              output,
+              result: output,
+              errorText,
+              error: errorText,
+            };
+          }
+          return p;
+        });
+        return { ...msg, parts: updatedParts as MessagePart[] };
+      })
+    );
+
+    addNotification(`Output added for tool: ${tool}`, 'info');
+  }, [addNotification]);
+
+  const addToolApprovalResponse = useCallback(({ id, approved }: { id?: string; approved: boolean }) => {
+    setMessages((prev) =>
+      prev.map((msg) => {
+        if (msg.role !== 'assistant') return msg;
+        const updatedParts = msg.parts.map((p) => {
+          if (p.type === 'tool-invocation' && (p.approval?.id === id || p.state === 'approval-requested')) {
+            return {
+              ...p,
+              state: approved ? ('output-available' as const) : ('output-denied' as const),
+              approval: { ...p.approval, approved, isAutomatic: false },
+            };
+          }
+          return p;
+        });
+        return { ...msg, parts: updatedParts as MessagePart[] };
+      })
+    );
+
+    addNotification(`Tool execution ${approved ? 'approved' : 'denied'} by user`, approved ? 'info' : 'warning');
+  }, [addNotification]);
 
   const sendMessage = useCallback(
     async (inputPayload: string | { text: string }, overridePersonaId?: string, overrideModelId?: string) => {
@@ -162,6 +253,7 @@ export function useChatStream({
         const decoder = new TextDecoder('utf-8');
         let accumulatedText = '';
         const toolPartsMap: Record<string, ToolInvocationPart> = {};
+        const extraParts: MessagePart[] = [];
         let hasStartedStreaming = false;
 
         let buffer = '';
@@ -186,7 +278,38 @@ export function useChatStream({
             try {
               const data = JSON.parse(jsonStr);
 
-              // 1. Tool Event: tool_call_streaming
+              // Transient data notification handling (onData implementation)
+              if (data.type === 'data-notification' || data.type === 'data_notification') {
+                if (data.data?.message) {
+                  addNotification(data.data.message, data.data.level || 'info');
+                }
+              }
+
+              // Step start marker
+              if (data.type === 'step-start' || data.type === 'step_start') {
+                extraParts.push({ type: 'step-start' });
+              }
+
+              // Persistent data parts with reconciliation (e.g. data-weather)
+              if (data.type === 'data-weather') {
+                const existingIdx = extraParts.findIndex((p) => p.type === 'data-weather' && p.id === data.id);
+                if (existingIdx >= 0) {
+                  extraParts[existingIdx] = { type: 'data-weather', id: data.id, data: data.data };
+                } else {
+                  extraParts.push({ type: 'data-weather', id: data.id, data: data.data });
+                }
+              }
+
+              // Sources
+              if (data.type === 'source') {
+                extraParts.push({
+                  type: 'source',
+                  url: data.value?.url || 'https://vercel.com',
+                  title: data.value?.title || 'Data Source',
+                });
+              }
+
+              // Tool Events
               if (data.type === 'tool_call_streaming' || data.type === 'tool-call-streaming') {
                 toolPartsMap[data.toolCallId] = {
                   type: 'tool-invocation',
@@ -195,9 +318,7 @@ export function useChatStream({
                   args: data.args || {},
                   state: 'input-streaming',
                 };
-              }
-              // 2. Tool Event: tool_call_available
-              else if (data.type === 'tool_call_available' || data.type === 'tool-call') {
+              } else if (data.type === 'tool_call_available' || data.type === 'tool-call') {
                 toolPartsMap[data.toolCallId] = {
                   type: 'tool-invocation',
                   toolCallId: data.toolCallId,
@@ -205,9 +326,20 @@ export function useChatStream({
                   args: data.args || {},
                   state: 'input-available',
                 };
-              }
-              // 3. Tool Event: tool_result
-              else if (data.type === 'tool_result' || data.type === 'tool-result') {
+
+                // CLIENT-SIDE TOOL AUTO EXECUTION TRIGGER (getLocation)
+                if (data.toolName === 'getLocation') {
+                  setTimeout(() => {
+                    const cities = ['New York', 'Los Angeles', 'Chicago', 'San Francisco', 'Tokyo', 'London'];
+                    const cityResult = cities[Math.floor(Math.random() * cities.length)];
+                    addToolOutput({
+                      tool: 'getLocation',
+                      toolCallId: data.toolCallId,
+                      output: cityResult,
+                    });
+                  }, 600);
+                }
+              } else if (data.type === 'tool_result' || data.type === 'tool-result') {
                 toolPartsMap[data.toolCallId] = {
                   type: 'tool-invocation',
                   toolCallId: data.toolCallId,
@@ -215,10 +347,9 @@ export function useChatStream({
                   args: data.args || {},
                   state: 'output-available',
                   result: data.result,
+                  output: data.result,
                 };
-              }
-              // 4. Tool Event: tool_error
-              else if (data.type === 'tool_error' || data.type === 'tool-error') {
+              } else if (data.type === 'tool_error' || data.type === 'tool-error') {
                 toolPartsMap[data.toolCallId] = {
                   type: 'tool-invocation',
                   toolCallId: data.toolCallId,
@@ -226,6 +357,7 @@ export function useChatStream({
                   args: data.args || {},
                   state: 'output-error',
                   error: data.error || 'Tool execution encountered an error.',
+                  errorText: data.error || 'Tool execution encountered an error.',
                 };
               }
 
@@ -250,6 +382,7 @@ export function useChatStream({
 
               // Update assistant message parts
               const currentParts: MessagePart[] = [
+                ...extraParts,
                 ...Object.values(toolPartsMap),
                 ...(accumulatedText ? [{ type: 'text' as const, text: accumulatedText }] : []),
               ];
@@ -270,7 +403,6 @@ export function useChatStream({
                 break;
               }
             } catch {
-              // Direct string text chunk fallback
               if (jsonStr) {
                 accumulatedText += jsonStr;
                 setMessages((prev) =>
@@ -279,7 +411,7 @@ export function useChatStream({
                       ? {
                           ...msg,
                           content: accumulatedText,
-                          parts: [...Object.values(toolPartsMap), { type: 'text', text: accumulatedText }],
+                          parts: [...extraParts, ...Object.values(toolPartsMap), { type: 'text', text: accumulatedText }],
                         }
                       : msg
                   )
@@ -329,12 +461,10 @@ export function useChatStream({
         abortControllerRef.current = null;
       }
     },
-    [messages, personaId, modelId, temperature, status]
+    [messages, personaId, modelId, temperature, status, addNotification, addToolOutput]
   );
 
-  // Client-side confirmation handler for user-interaction tool
   const handleConfirmAction = useCallback(async (input: ConfirmActionInput) => {
-    // Find latest assistant message with confirmAction tool part
     setMessages((prev) =>
       prev.map((msg) => {
         if (msg.role !== 'assistant') return msg;
@@ -346,22 +476,22 @@ export function useChatStream({
               status: 'executed',
               transactionId: `TX-${Math.floor(100000 + Math.random() * 900000)}`,
               executedAt: new Date().toISOString(),
-              summary: `Report export executed successfully for ${input.targetName}. Report delivered to workspace analytics dashboard.`,
+              summary: `Report export executed successfully for ${input.targetName}. Delivered to workspace analytics dashboard.`,
             };
             return {
               ...p,
               state: 'output-available' as const,
               result: mockResult,
+              output: mockResult,
             };
           }
           return p;
         });
-        return { ...msg, parts: updatedParts };
+        return { ...msg, parts: updatedParts as MessagePart[] };
       })
     );
   }, []);
 
-  // Client-side retry handler for tool error state
   const handleRetryTool = useCallback((toolName: string, args?: Record<string, unknown>) => {
     sendMessage(`Retry tool execution for ${toolName} with parameters: ${JSON.stringify(args || {})}`);
   }, [sendMessage]);
@@ -400,12 +530,15 @@ export function useChatStream({
     messages,
     status,
     errorMessage,
+    notifications,
     sendMessage,
     stop,
     regenerate,
     clearMessages,
     handleConfirmAction,
     handleRetryTool,
+    addToolOutput,
+    addToolApprovalResponse,
     setMessages,
     transport,
   };

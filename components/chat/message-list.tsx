@@ -7,7 +7,7 @@ import { MessageItem } from './message-item';
 import { useAutoScroll } from '@/hooks/use-auto-scroll';
 import { AIPersona } from '@/lib/ai-config';
 import { ConfirmActionInput } from '@/lib/tools';
-import { ArrowDown, Sparkles, Building2, Globe, FileSpreadsheet, AlertOctagon } from 'lucide-react';
+import { ArrowDown, Sparkles, Building2, Globe, FileSpreadsheet, AlertOctagon, Sun, MapPin } from 'lucide-react';
 
 interface MessageListProps {
   messages: Message[];
@@ -16,6 +16,8 @@ interface MessageListProps {
   onRegenerate: () => void;
   onSelectPrompt: (prompt: string) => void;
   onConfirmAction?: (input: ConfirmActionInput) => Promise<void>;
+  onAddToolOutput?: (params: { tool: string; toolCallId: string; output?: unknown; state?: 'output-error'; errorText?: string }) => void;
+  onAddToolApprovalResponse?: (params: { id?: string; approved: boolean }) => void;
   onRetryTool?: (toolName: string, args?: Record<string, unknown>) => void;
 }
 
@@ -26,6 +28,8 @@ export function MessageList({
   onRegenerate,
   onSelectPrompt,
   onConfirmAction,
+  onAddToolOutput,
+  onAddToolApprovalResponse,
   onRetryTool,
 }: MessageListProps) {
   const lastMessageContent = messages[messages.length - 1]?.content || '';
@@ -46,6 +50,18 @@ export function MessageList({
       title: 'Inspect Meta Tags Vercel',
       prompt: 'Fetch and analyze meta tags for vercel.com',
       desc: 'Social preview mockup & security headers',
+    },
+    {
+      icon: <Sun className="w-4 h-4 text-amber-400" />,
+      title: 'Check Tokyo Weather',
+      prompt: 'Get the weather in Tokyo',
+      desc: 'Server-side weather tool with live telemetry card',
+    },
+    {
+      icon: <MapPin className="w-4 h-4 text-cyan-400" />,
+      title: 'Auto Client Location',
+      prompt: 'Where am I? Get my location',
+      desc: 'Auto-executed client-side tool (onToolCall)',
     },
     {
       icon: <FileSpreadsheet className="w-4 h-4 text-purple-400" />,
@@ -78,7 +94,7 @@ export function MessageList({
           >
             <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-purple-950/80 border border-purple-700/60 text-purple-300 text-xs font-semibold shadow-lg shadow-purple-950/40">
               <Sparkles className="w-4 h-4 text-purple-400 animate-spin" style={{ animationDuration: '4s' }} />
-              <span>FE-07 Server Tools & Generative UI</span>
+              <span>AI SDK v5 Server Tools, Client Tools & Streaming Custom Data</span>
             </div>
 
             <div className="text-center space-y-2">
@@ -86,12 +102,12 @@ export function MessageList({
                 Generative AI UI & Server Tools
               </h1>
               <p className="text-sm md:text-base text-purple-200/80 max-w-lg mx-auto leading-relaxed font-normal">
-                Real-time Zod schemas, 4-state lifecycle rendering, SVG charts, and interactive confirmation widgets.
+                Real-time Zod schemas, client auto execution (<code className="font-mono text-purple-300">onToolCall</code>), user confirmation dialogs, transient notifications, and data part reconciliation.
               </p>
             </div>
 
             {/* Quick Demo Action Chips */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full pt-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 w-full pt-4">
               {toolPromptChips.map((chip, idx) => (
                 <button
                   key={idx}
@@ -126,6 +142,8 @@ export function MessageList({
                 }
                 onRegenerate={onRegenerate}
                 onConfirmAction={onConfirmAction}
+                onAddToolOutput={onAddToolOutput}
+                onAddToolApprovalResponse={onAddToolApprovalResponse}
                 onRetryTool={onRetryTool}
               />
             ))}

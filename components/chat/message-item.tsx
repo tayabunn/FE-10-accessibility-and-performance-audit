@@ -2,12 +2,13 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Message, ToolInvocationPart } from '@/hooks/use-chat-stream';
+import { Message, ToolInvocationPart, MessagePart } from '@/hooks/use-chat-stream';
 import { StreamingMarkdownRenderer } from './markdown-renderer';
 import { ToolPartRenderer } from '../tools/tool-part-renderer';
+import { WeatherCard } from '../tools/weather-card';
 import { AIPersona } from '@/lib/ai-config';
 import { ConfirmActionInput } from '@/lib/tools';
-import { User, Sparkles, Copy, Check, RotateCcw, AlertTriangle } from 'lucide-react';
+import { User, Sparkles, Copy, Check, RotateCcw, AlertTriangle, ExternalLink, Compass } from 'lucide-react';
 
 interface MessageItemProps {
   message: Message;
@@ -15,6 +16,8 @@ interface MessageItemProps {
   isLastAssistant?: boolean;
   onRegenerate?: () => void;
   onConfirmAction?: (input: ConfirmActionInput) => Promise<void>;
+  onAddToolOutput?: (params: { tool: string; toolCallId: string; output?: unknown; state?: 'output-error'; errorText?: string }) => void;
+  onAddToolApprovalResponse?: (params: { id?: string; approved: boolean }) => void;
   onRetryTool?: (toolName: string, args?: Record<string, unknown>) => void;
 }
 
@@ -24,6 +27,8 @@ export function MessageItem({
   isLastAssistant,
   onRegenerate,
   onConfirmAction,
+  onAddToolOutput,
+  onAddToolApprovalResponse,
   onRetryTool,
 }: MessageItemProps) {
   const [copied, setCopied] = useState(false);
@@ -33,16 +38,12 @@ export function MessageItem({
   const isStopped = message.status === 'stopped';
   const isError = message.status === 'error';
 
-  // Separate tool invocation parts from markdown text content
-  const toolParts = (message.parts || []).filter(
-    (p): p is ToolInvocationPart => p.type === 'tool-invocation'
-  );
+  const parts = message.parts || [];
 
-  const textContent =
-    (message.parts || [])
-      .filter((p) => p.type === 'text')
-      .map((p) => (p as { type: 'text'; text: string }).text)
-      .join('') || message.content;
+  const textContent = parts
+    .filter((p) => p.type === 'text')
+    .map((p) => (p as { type: 'text'; text: string }).text)
+    .join('') || message.content;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(textContent);
@@ -107,7 +108,7 @@ export function MessageItem({
 
         {/* Thinking State */}
         <AnimatePresence mode="wait">
-          {isThinking && toolParts.length === 0 && !textContent && (
+          {isThinking && parts.length === 0 && !textContent && (
             <motion.div
               key="thinking-state"
               initial={{ opacity: 0, scale: 0.98 }}
@@ -126,19 +127,59 @@ export function MessageItem({
           )}
         </AnimatePresence>
 
-        {/* Render Structured Tool Invocation Parts */}
-        {toolParts.length > 0 && (
-          <div className="space-y-3 my-2">
-            {toolParts.map((part) => (
-              <ToolPartRenderer
-                key={part.toolCallId}
-                toolPart={part}
-                onConfirmAction={onConfirmAction}
-                onRetryTool={onRetryTool}
-              />
-            ))}
-          </div>
-        )}
+        {/* Render Parts Array (handling step-start, source, data-weather, tool-invocation) */}
+        {parts.map((part, index) => {
+          switch (part.type) {
+            case 'step-start':
+              return index > 0 ? (
+                <div key={`step_${index}`} className="my-3 flex items-center gap-2 text-slate-500 text-[11px] font-mono">
+                  <span className="h-px flex-1 bg-purple-900/40" />
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-purple-950 border border-purple-800/40 text-purple-300">
+                    <Compass className="w-3 h-3 text-purple-400" /> Multi-Step Iteration #{index}
+                  </span>
+                  <span className="h-px flex-1 bg-purple-900/40" />
+                </div>
+              ) : null;
+
+            case 'source':
+              return (
+                <div key={`src_${index}`} className="my-1.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-purple-950/60 border border-purple-800/50 text-xs text-purple-300 shadow-sm">
+                  <span className="font-semibold text-slate-300">Source:</span>
+                  <a href={part.url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-purple-400 hover:text-purple-200 underline font-mono text-[11px]">
+                    <span>{part.title}</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              );
+
+            case 'data-weather':
+              return (
+                <div key={`data_weather_${index}`} className="my-3">
+                  <WeatherCard
+                    city={part.data.city}
+                    weather={part.data.weather}
+                    status={part.data.status}
+                  />
+                </div>
+              );
+
+            case 'tool-invocation':
+            case 'dynamic-tool':
+              return (
+                <ToolPartRenderer
+                  key={(part as ToolInvocationPart).toolCallId || index}
+                  toolPart={part as ToolInvocationPart}
+                  onConfirmAction={onConfirmAction}
+                  onAddToolOutput={onAddToolOutput}
+                  onAddToolApprovalResponse={onAddToolApprovalResponse}
+                  onRetryTool={onRetryTool}
+                />
+              );
+
+            default:
+              return null;
+          }
+        })}
 
         {/* Render Markdown Text Content */}
         {(isStreaming || textContent || isStopped || isError) && (

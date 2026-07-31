@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { 
   streamText, 
   convertToModelMessages, 
+  createUIMessageStream,
   createUIMessageStreamResponse, 
   toUIMessageStream, 
+  isStepCount,
   UIMessage 
 } from 'ai';
 import { anthropic } from '@ai-sdk/anthropic';
@@ -14,7 +16,15 @@ import {
   AI_MODELS, 
   getAPIKeyStatus, 
 } from '@/lib/ai-config';
-import { ALL_TOOLS, scoreLeadTool, fetchMetaTagsTool, confirmActionTool, simulateSystemDiagnosticTool } from '@/lib/tools';
+import { 
+  ALL_TOOLS, 
+  scoreLeadTool, 
+  fetchMetaTagsTool, 
+  confirmActionTool, 
+  simulateSystemDiagnosticTool,
+  getWeatherInformationTool 
+} from '@/lib/tools';
+import type { MyUIMessage } from '@/ai/types';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -34,6 +44,13 @@ const openrouter = openRouterKey
     })
   : null;
 
+export function errorHandler(error: unknown): string {
+  if (error == null) return 'Unknown error occurred during processing.';
+  if (typeof error === 'string') return error;
+  if (error instanceof Error) return error.message;
+  return JSON.stringify(error);
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -52,7 +69,7 @@ export async function POST(req: NextRequest) {
       ? [...messages].reverse().find((m: { role: string }) => m.role === 'user')?.content || ''
       : '';
 
-    let modelMessages = [];
+    let modelMessages: any[] = [];
     try {
       if (Array.isArray(messages) && messages.length > 0) {
         modelMessages = await convertToModelMessages(messages as UIMessage[]);
@@ -71,96 +88,102 @@ You have access to real-time structured tools:
 2. 'fetchMetaTags': Scrapes & analyzes website meta tags, Open Graph card preview, and security headers. Use when user provides a URL or asks to inspect meta tags.
 3. 'confirmAction': Proposes an external CRM or export action requiring user confirmation.
 4. 'simulateSystemDiagnostic': Runs a microservice health check. Use when user asks to test tool error states or system diagnostics.
+5. 'getWeatherInformation': Shows the weather in a given city to the user.
+6. 'askForConfirmation': Ask the user for confirmation on the client side.
+7. 'getLocation': Client-side tool that gets the user's location.
 
 Always invoke the appropriate tool when user queries fit these capabilities.`;
 
-    // 1. OpenRouter Provider Execution
-    if (openrouter) {
-      let openRouterModelName = 'anthropic/claude-3.5-sonnet';
-
-      if (modelConfig.id === 'claude-3-5-sonnet') {
-        openRouterModelName = 'anthropic/claude-3.5-sonnet';
-      } else if (modelConfig.id === 'gpt-4o') {
-        openRouterModelName = 'openai/gpt-4o';
-      } else if (modelConfig.id === 'gemini-1-5-pro') {
-        openRouterModelName = 'google/gemini-2.0-flash-001';
+    // Function to get active model instance
+    const getActiveModel = () => {
+      if (openrouter) {
+        let openRouterModelName = 'anthropic/claude-3.5-sonnet';
+        if (modelConfig.id === 'claude-3-5-sonnet') openRouterModelName = 'anthropic/claude-3.5-sonnet';
+        else if (modelConfig.id === 'gpt-4o') openRouterModelName = 'openai/gpt-4o';
+        else if (modelConfig.id === 'gemini-1-5-pro') openRouterModelName = 'google/gemini-2.0-flash-001';
+        return openrouter.chat(openRouterModelName);
       }
-
-      try {
-        const result = streamText({
-          model: openrouter.chat(openRouterModelName),
-          system: systemPromptWithTools,
-          messages: modelMessages,
-          tools: ALL_TOOLS,
-          temperature,
-        });
-
-        return createUIMessageStreamResponse({
-          stream: toUIMessageStream({ stream: result.stream }),
-        });
-      } catch (openRouterErr) {
-        console.warn('[OpenRouter Stream Warning]: Falling back to mock:', openRouterErr);
+      if (modelConfig.provider === 'anthropic' && keyStatus.hasAnthropicKey) {
+        return anthropic(modelConfig.sdkModelName);
       }
-    }
+      if (modelConfig.provider === 'openai' && keyStatus.hasOpenAIKey) {
+        return openai(modelConfig.sdkModelName);
+      }
+      if (modelConfig.provider === 'google' && keyStatus.hasGoogleKey) {
+        return google(modelConfig.sdkModelName);
+      }
+      return null;
+    };
 
-    // 2. Direct Anthropic Provider
-    if (modelConfig.provider === 'anthropic' && keyStatus.hasAnthropicKey) {
-      const result = streamText({
-        model: anthropic(modelConfig.sdkModelName),
-        system: systemPromptWithTools,
-        messages: modelMessages,
-        tools: ALL_TOOLS,
-        temperature,
+    const activeModel = getActiveModel();
+
+    if (activeModel) {
+      const stream = createUIMessageStream<MyUIMessage>({
+        execute: ({ writer }) => {
+          // 1. Send initial transient notification
+          writer.write({
+            type: 'data-notification',
+            data: { message: 'Processing your request with AI SDK v5...', level: 'info' },
+            transient: true,
+          });
+
+          // 2. If weather query detected, demonstrate data part loading & reconciliation
+          const lowerPrompt = lastUserMessage.toLowerCase();
+          if (lowerPrompt.includes('weather') || lowerPrompt.includes('temperature') || lowerPrompt.includes('forecast')) {
+            const extractedCity = lowerPrompt.includes('tokyo') ? 'Tokyo' : lowerPrompt.includes('paris') ? 'Paris' : 'San Francisco';
+            writer.write({
+              type: 'data-weather',
+              id: `weather_${Date.now()}`,
+              data: { city: extractedCity, status: 'loading' },
+            });
+          }
+
+          // 3. Execute streamText with multi-step support
+          const result = streamText({
+            model: activeModel,
+            system: systemPromptWithTools,
+            messages: modelMessages,
+            tools: ALL_TOOLS,
+            stopWhen: isStepCount(5),
+            temperature,
+            onEnd() {
+              // 4. Send transient completion notification
+              writer.write({
+                type: 'data-notification',
+                data: { message: 'Streaming & tool execution finished successfully.', level: 'info' },
+                transient: true,
+              });
+            },
+          });
+
+          writer.merge(
+            toUIMessageStream({
+              stream: result.stream,
+              onError: errorHandler,
+            })
+          );
+        },
       });
 
-      return createUIMessageStreamResponse({
-        stream: toUIMessageStream({ stream: result.stream }),
-      });
-    }
-
-    // 3. Direct OpenAI Provider
-    if (modelConfig.provider === 'openai' && keyStatus.hasOpenAIKey) {
-      const result = streamText({
-        model: openai(modelConfig.sdkModelName),
-        system: systemPromptWithTools,
-        messages: modelMessages,
-        tools: ALL_TOOLS,
-        temperature,
-      });
-
-      return createUIMessageStreamResponse({
-        stream: toUIMessageStream({ stream: result.stream }),
-      });
-    }
-
-    // 4. Direct Google Provider
-    if (modelConfig.provider === 'google' && keyStatus.hasGoogleKey) {
-      const result = streamText({
-        model: google(modelConfig.sdkModelName),
-        system: systemPromptWithTools,
-        messages: modelMessages,
-        tools: ALL_TOOLS,
-        temperature,
-      });
-
-      return createUIMessageStreamResponse({
-        stream: toUIMessageStream({ stream: result.stream }),
-      });
+      return createUIMessageStreamResponse({ stream });
     }
 
     // -------------------------------------------------------------
-    // DEMO SSE STREAMER WITH TOOL LIFECYCLE FOR REVIEWER / OFFLINE MODE
+    // DEMO / OFFLINE SSE STREAMER WITH TOOL LIFECYCLE FOR PREVIEW MODE
     // -------------------------------------------------------------
     const lowerPrompt = lastUserMessage.toLowerCase();
     const isLeadPrompt = lowerPrompt.includes('score') || lowerPrompt.includes('stripe') || lowerPrompt.includes('lead') || lowerPrompt.includes('prospect');
     const isMetaPrompt = lowerPrompt.includes('meta') || lowerPrompt.includes('http') || lowerPrompt.includes('.com') || lowerPrompt.includes('url') || lowerPrompt.includes('vercel');
     const isConfirmPrompt = lowerPrompt.includes('export') || lowerPrompt.includes('confirm') || lowerPrompt.includes('crm');
     const isErrorPrompt = lowerPrompt.includes('error') || lowerPrompt.includes('diagnostic') || lowerPrompt.includes('fail');
+    const isWeatherPrompt = lowerPrompt.includes('weather') || lowerPrompt.includes('temperature') || lowerPrompt.includes('city');
+    const isLocationPrompt = lowerPrompt.includes('location') || lowerPrompt.includes('where am i') || lowerPrompt.includes('where');
+    const isAskConfirmPrompt = lowerPrompt.includes('ask') && lowerPrompt.includes('confirm');
 
     const encoder = new TextEncoder();
-    const stream = new ReadableStream({
+    const demoStream = new ReadableStream({
       async start(controller) {
-        // Message Start
+        // Stream message_start
         controller.enqueue(
           encoder.encode(
             `event: message_start\ndata: ${JSON.stringify({
@@ -170,7 +193,18 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
           )
         );
 
-        // Thinking phase
+        // Send transient data-notification chunk (Stream protocol format)
+        controller.enqueue(
+          encoder.encode(
+            `event: data_notification\ndata: ${JSON.stringify({
+              type: 'data-notification',
+              data: { message: 'Initializing AI SDK v5 stream pipeline...', level: 'info' },
+              transient: true,
+            })}\n\n`
+          )
+        );
+
+        // Thinking block
         controller.enqueue(
           encoder.encode(
             `event: content_block_start\ndata: ${JSON.stringify({
@@ -186,12 +220,12 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
             `event: content_block_delta\ndata: ${JSON.stringify({
               type: 'content_block_delta',
               index: 0,
-              delta: { type: 'thinking_delta', thinking: 'Analyzing query intent & selecting server-side Zod tool...' },
+              delta: { type: 'thinking_delta', thinking: 'Analyzing request intent & building Zod tool call payload...' },
             })}\n\n`
           )
         );
 
-        await new Promise((resolve) => setTimeout(resolve, 400));
+        await new Promise((resolve) => setTimeout(resolve, 350));
 
         controller.enqueue(
           encoder.encode(
@@ -199,9 +233,104 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
           )
         );
 
-        // TOOL EXECUTION DEMO FLOW IF TRIGGERED
-        if (isLeadPrompt || isMetaPrompt || isConfirmPrompt || isErrorPrompt) {
-          const toolCallId = `call_${Math.random().toString(36).substring(2, 9)}`;
+        // TOOL EXECUTION DEMO FLOW
+        const toolCallId = `call_${Math.random().toString(36).substring(2, 9)}`;
+
+        if (isAskConfirmPrompt) {
+          // Client interaction tool: askForConfirmation
+          const args = { message: 'Do you authorize updating the sales territory assignment for Stripe, Inc.?' };
+          controller.enqueue(
+            encoder.encode(
+              `event: tool_call_streaming\ndata: ${JSON.stringify({
+                type: 'tool_call_streaming',
+                toolCallId,
+                toolName: 'askForConfirmation',
+                args,
+                state: 'input-streaming',
+              })}\n\n`
+            )
+          );
+          await new Promise((res) => setTimeout(res, 400));
+          controller.enqueue(
+            encoder.encode(
+              `event: tool_call_available\ndata: ${JSON.stringify({
+                type: 'tool_call_available',
+                toolCallId,
+                toolName: 'askForConfirmation',
+                args,
+                state: 'input-available',
+              })}\n\n`
+            )
+          );
+        } else if (isLocationPrompt) {
+          // Client auto tool: getLocation
+          const args = {};
+          controller.enqueue(
+            encoder.encode(
+              `event: tool_call_streaming\ndata: ${JSON.stringify({
+                type: 'tool_call_streaming',
+                toolCallId,
+                toolName: 'getLocation',
+                args,
+                state: 'input-streaming',
+              })}\n\n`
+            )
+          );
+          await new Promise((res) => setTimeout(res, 400));
+          controller.enqueue(
+            encoder.encode(
+              `event: tool_call_available\ndata: ${JSON.stringify({
+                type: 'tool_call_available',
+                toolCallId,
+                toolName: 'getLocation',
+                args,
+                state: 'input-available',
+              })}\n\n`
+            )
+          );
+        } else if (isWeatherPrompt) {
+          // Server tool: getWeatherInformation
+          const city = lowerPrompt.includes('tokyo') ? 'Tokyo' : lowerPrompt.includes('london') ? 'London' : 'San Francisco';
+          const args = { city };
+
+          controller.enqueue(
+            encoder.encode(
+              `event: tool_call_streaming\ndata: ${JSON.stringify({
+                type: 'tool_call_streaming',
+                toolCallId,
+                toolName: 'getWeatherInformation',
+                args,
+                state: 'input-streaming',
+              })}\n\n`
+            )
+          );
+          await new Promise((res) => setTimeout(res, 400));
+          controller.enqueue(
+            encoder.encode(
+              `event: tool_call_available\ndata: ${JSON.stringify({
+                type: 'tool_call_available',
+                toolCallId,
+                toolName: 'getWeatherInformation',
+                args,
+                state: 'input-available',
+              })}\n\n`
+            )
+          );
+          await new Promise((res) => setTimeout(res, 500));
+          const weatherResult = await getWeatherInformationTool.execute!(args, { toolCallId, messages: [] } as any);
+          controller.enqueue(
+            encoder.encode(
+              `event: tool_result\ndata: ${JSON.stringify({
+                type: 'tool_result',
+                toolCallId,
+                toolName: 'getWeatherInformation',
+                args,
+                result: weatherResult,
+                state: 'output-available',
+              })}\n\n`
+            )
+          );
+        } else if (isLeadPrompt || isMetaPrompt || isConfirmPrompt || isErrorPrompt) {
           const toolName = isErrorPrompt
             ? 'simulateSystemDiagnostic'
             : isConfirmPrompt
@@ -218,7 +347,6 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
             ? { url: 'https://vercel.com', checkSecurityHeaders: true }
             : { companyName: 'Stripe, Inc.', industry: 'Fintech & Payments', employeeCount: 8000 };
 
-          // 1. Tool Call Streaming (input-streaming)
           controller.enqueue(
             encoder.encode(
               `event: tool_call_streaming\ndata: ${JSON.stringify({
@@ -231,9 +359,8 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
             )
           );
 
-          await new Promise((res) => setTimeout(res, 500));
+          await new Promise((res) => setTimeout(res, 450));
 
-          // 2. Tool Input Available (input-available)
           controller.enqueue(
             encoder.encode(
               `event: tool_call_available\ndata: ${JSON.stringify({
@@ -246,9 +373,8 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
             )
           );
 
-          await new Promise((res) => setTimeout(res, 600));
+          await new Promise((res) => setTimeout(res, 500));
 
-          // Execute tool backend function or return result/error
           try {
             let resultData;
             const toolExecOptions = { toolCallId, messages: [] } as any;
@@ -262,7 +388,6 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
               resultData = await simulateSystemDiagnosticTool.execute!(args as any, toolExecOptions);
             }
 
-            // 3. Tool Output Available (output-available)
             controller.enqueue(
               encoder.encode(
                 `event: tool_result\ndata: ${JSON.stringify({
@@ -277,8 +402,6 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
             );
           } catch (err: unknown) {
             const errStr = err instanceof Error ? err.message : 'Tool execution error';
-
-            // 4. Tool Output Error (output-error)
             controller.enqueue(
               encoder.encode(
                 `event: tool_error\ndata: ${JSON.stringify({
@@ -294,7 +417,7 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
           }
         }
 
-        // Text summary block after tool result
+        // Text summary block
         controller.enqueue(
           encoder.encode(
             `event: content_block_start\ndata: ${JSON.stringify({
@@ -305,7 +428,13 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
           )
         );
 
-        const summaryText = isErrorPrompt
+        const summaryText = isAskConfirmPrompt
+          ? `I have requested your confirmation above before proceeding with the territory update.`
+          : isLocationPrompt
+          ? `I've triggered the client-side \`getLocation\` tool. Your browser location will be fetched automatically.`
+          : isWeatherPrompt
+          ? `Here is the current weather update retrieved via the server-side \`getWeatherInformation\` tool.`
+          : isErrorPrompt
           ? `I attempted to run the \`simulateSystemDiagnostic\` tool on the backend microservice. As shown in the designed error component above, the microservice returned a 503 error. The system caught this gracefully without crashing.`
           : isConfirmPrompt
           ? `I've prepared the lead export action. Please review the details in the confirmation widget above and click **Approve & Execute** to proceed.`
@@ -344,7 +473,7 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
       },
     });
 
-    return new Response(stream, {
+    return new Response(demoStream, {
       headers: {
         'Content-Type': 'text/event-stream; charset=utf-8',
         'Cache-Control': 'no-cache, no-transform',
