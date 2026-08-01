@@ -54,4 +54,21 @@ describe('Creator Settings Schema Validation', () => {
     const result = creatorSettingsSchema.safeParse(payloadWithAlias);
     expect(result.success).toBe(true);
   });
+
+  it('should fail validation when bio exceeds 150 characters', () => {
+    const payloadWithLongBio = {
+      username: 'creator123',
+      email: 'creator@example.com',
+      payoutEmail: 'payout@example.com',
+      bio: 'a'.repeat(151),
+      theme: 'dark' as const,
+      newsletter: false,
+    };
+    const result = creatorSettingsSchema.safeParse(payloadWithLongBio);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toContain('150 characters');
+    }
+  });
 });
+
