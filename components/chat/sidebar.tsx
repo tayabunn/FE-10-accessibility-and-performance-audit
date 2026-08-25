@@ -19,7 +19,8 @@ import {
   Layers,
   Sparkles,
   ExternalLink,
-  Settings
+  Settings,
+  MousePointerClick
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -229,6 +230,14 @@ export function Sidebar({
 
             {/* Clear History, Settings & Footer */}
             <div className="pt-4 border-t border-purple-900/30 space-y-2">
+              <Link
+                href="/buttons"
+                className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-indigo-950/50 hover:bg-indigo-900/60 text-indigo-200 hover:text-white border border-indigo-800/50 text-xs font-semibold transition-all"
+              >
+                <MousePointerClick className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Buttons Demo</span>
+              </Link>
+
               <Link
                 href="/settings"
                 className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-purple-950/50 hover:bg-purple-900/60 text-purple-200 hover:text-white border border-purple-800/50 text-xs font-semibold transition-all"

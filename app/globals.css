@@ -52,3 +52,39 @@ body {
   backdrop-filter: blur(16px);
   border: 1px solid rgba(147, 51, 234, 0.25);
 }
+
+/* ─── Error Shake Keyframe ─── */
+/* Single sharp oscillation (300ms). Communicates "something went wrong" 
+   without being repetitive or distracting. */
+@keyframes shake-once {
+  0%   { transform: translateX(0); }
+  15%  { transform: translateX(-6px); }
+  30%  { transform: translateX(5px); }
+  45%  { transform: translateX(-4px); }
+  60%  { transform: translateX(3px); }
+  75%  { transform: translateX(-1px); }
+  100% { transform: translateX(0); }
+}
+
+.animate-shake-once {
+  animation: shake-once 0.3s ease-out;
+}
+
+/* ─── Reduced Motion ─── */
+/* Reduce or remove motion, never remove feedback.
+   Movement-based transforms are suppressed; color/icon/text state 
+   changes remain fully visible so users always know what happened. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-shake-once {
+    animation: none !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.1s !important;
+    scroll-behavior: auto !important;
+  }
+}
