@@ -3,6 +3,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2, Check, RefreshCw } from 'lucide-react';
+import { usePrefersReducedMotion } from '@/hooks/use-reduced-motion';
 import { cn } from '@/lib/utils';
 
 /* ─────────────────────────── Types ─────────────────────────── */
@@ -304,22 +305,4 @@ export function AsyncActionButton({
   );
 }
 
-/* ─────────────── Reduced-motion detection hook ─────────────── */
 
-function usePrefersReducedMotion(): boolean {
-  // Lazy initializer avoids calling setState inside useEffect (React 19 compiler rule).
-  // SSR-safe: defaults to false when window is unavailable.
-  const [prefersReduced, setPrefersReduced] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  });
-
-  useEffect(() => {
-    const mql = window.matchMedia('(prefers-reduced-motion: reduce)');
-    const handler = (e: MediaQueryListEvent) => setPrefersReduced(e.matches);
-    mql.addEventListener('change', handler);
-    return () => mql.removeEventListener('change', handler);
-  }, []);
-
-  return prefersReduced;
-}

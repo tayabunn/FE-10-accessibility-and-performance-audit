@@ -119,5 +119,11 @@ The action buttons in this checkpoint (`Send`, `Stop`, and `Retry`) implement pr
 
 ---
 
+## 🎭 FE-09: Motion Decisions
+
+Hover and press interactions use short transitions to provide immediate feedback. Loading, success, and error states transition with opacity and transform so state changes never feel abrupt and unnecessary layout work is minimized. Success remains visible briefly so completion is clear. Error feedback uses a single brief shake under normal motion preferences, while reduced-motion users still receive clear feedback through persistent text, icon, and color changes.
+
+---
+
 ## 🧪 License & Attribution
 Designed for **FE-08: Error States, Empty States & Edge Cases**. Built with Next.js 16, Vercel AI SDK, and Tailwind CSS.

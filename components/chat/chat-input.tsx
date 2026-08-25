@@ -13,10 +13,17 @@ import {
   CircleUserRound, 
   MonitorIcon, 
   FileUp, 
-  ImageIcon 
+  ImageIcon,
+  Loader2,
+  Check,
+  RefreshCw
 } from 'lucide-react';
 import { StreamState } from '@/hooks/use-chat-stream';
+import { fakeAsyncAction, ForceMode } from '@/lib/fake-async';
+import { usePrefersReducedMotion } from '@/hooks/use-reduced-motion';
 import { cn } from '@/lib/utils';
+
+type SendState = 'idle' | 'loading' | 'success' | 'error';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -28,6 +35,10 @@ interface ChatInputProps {
 export function ChatInput({ onSend, onStop, status, disabled }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  
+  const [sendState, setSendState] = useState<SendState>('idle');
+  const [demoMode, setDemoMode] = useState<ForceMode>('random');
+  const prefersReduced = usePrefersReducedMotion();
 
   const isStreaming = status === 'streaming';
   const isThinking = status === 'thinking';
@@ -53,11 +64,26 @@ export function ChatInput({ onSend, onStop, status, disabled }: ChatInputProps) 
     if (textareaRef.current) textareaRef.current.style.height = '48px';
   }, []);
 
-  const handleSend = () => {
-    if (!canSend) return;
-    onSend(message);
-    setMessage('');
-    adjustHeight(true);
+  const handleSend = async () => {
+    if (!canSend || (sendState !== 'idle' && sendState !== 'error')) return;
+    
+    setSendState('loading');
+    const messageToSend = message;
+
+    try {
+      await fakeAsyncAction(demoMode);
+      setSendState('success');
+      
+      // Wait for user to see success state, then fire actual send
+      setTimeout(() => {
+        setSendState('idle');
+        onSend(messageToSend);
+        setMessage('');
+        adjustHeight(true);
+      }, 1000);
+    } catch (err) {
+      setSendState('error');
+    }
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -150,26 +176,91 @@ export function ChatInput({ onSend, onStop, status, disabled }: ChatInputProps) 
                   <span>Stop</span>
                 </motion.button>
               ) : (
-                /* State: Idle / Disabled -> SEND Button */
+                /* State: Idle / Disabled -> SEND Button (Stateful) */
                 <motion.button
                   key="send-btn"
+                  layout
                   initial={{ scale: 0.8, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
                   exit={{ scale: 0.8, opacity: 0 }}
-                  whileHover={{ scale: canSend ? 1.05 : 1 }}
-                  whileTap={{ scale: canSend ? 0.95 : 1 }}
+                  whileHover={{ 
+                    scale: (canSend && (sendState === 'idle' || sendState === 'error')) ? 1.05 : 1, 
+                    y: (prefersReduced || !canSend) ? 0 : -1 
+                  }}
+                  whileTap={{ scale: (canSend && (sendState === 'idle' || sendState === 'error')) ? 0.95 : 1 }}
                   onClick={handleSend}
-                  disabled={!canSend}
+                  disabled={!canSend || (sendState === 'loading' || sendState === 'success')}
+                  aria-busy={sendState === 'loading'}
+                  aria-live="polite"
                   className={cn(
-                    'flex items-center gap-1 px-3 py-2 rounded-lg transition-all',
-                    canSend
-                      ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-semibold cursor-pointer shadow-lg shadow-purple-950/60'
-                      : 'bg-purple-950/30 text-purple-400/40 cursor-not-allowed border border-purple-900/30'
+                    'relative flex items-center justify-center overflow-hidden transition-colors rounded-lg',
+                    sendState === 'idle' && canSend ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-lg shadow-purple-950/60 text-white cursor-pointer' : '',
+                    sendState === 'idle' && !canSend ? 'bg-purple-950/30 text-purple-400/40 border border-purple-900/30 cursor-not-allowed' : '',
+                    sendState === 'loading' ? 'bg-purple-600 text-purple-100 cursor-wait' : '',
+                    sendState === 'success' ? 'bg-emerald-500 text-white cursor-default' : '',
+                    sendState === 'error' ? 'bg-rose-600 text-white cursor-pointer hover:bg-rose-500 shadow-lg shadow-rose-950/60' : '',
+                    sendState === 'error' && !prefersReduced ? 'animate-shake-once' : '',
+                    sendState === 'idle' ? 'px-3 py-2' : 'px-4 py-2'
                   )}
-                  title={canSend ? 'Send (Enter)' : 'Enter message'}
+                  title={canSend && sendState === 'idle' ? 'Send (Enter)' : sendState === 'error' ? 'Retry (Enter)' : 'Enter message'}
                 >
-                  <ArrowUpIcon className="w-4 h-4" />
-                  <span className="sr-only">Send</span>
+                  <AnimatePresence mode="wait">
+                    {sendState === 'idle' && (
+                      <motion.div
+                        key="idle"
+                        initial={prefersReduced ? { opacity: 0 } : { opacity: 0, y: 10 }}
+                        animate={prefersReduced ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                        exit={prefersReduced ? { opacity: 0 } : { opacity: 0, y: -10 }}
+                        transition={{ duration: 0.15 }}
+                        className="flex items-center justify-center"
+                      >
+                        <ArrowUpIcon className="w-4 h-4" />
+                        <span className="sr-only">Send</span>
+                      </motion.div>
+                    )}
+
+                    {sendState === 'loading' && (
+                      <motion.div
+                        key="loading"
+                        initial={prefersReduced ? { opacity: 0 } : { opacity: 0, y: 10 }}
+                        animate={prefersReduced ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                        exit={prefersReduced ? { opacity: 0 } : { opacity: 0, y: -10 }}
+                        transition={{ duration: 0.2 }}
+                        className="flex items-center gap-1.5"
+                      >
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span className="text-xs font-semibold">Sending...</span>
+                      </motion.div>
+                    )}
+
+                    {sendState === 'success' && (
+                      <motion.div
+                        key="success"
+                        initial={prefersReduced ? { opacity: 0 } : { opacity: 0, scale: 0.5 }}
+                        animate={prefersReduced ? { opacity: 1 } : { opacity: 1, scale: 1 }}
+                        exit={prefersReduced ? { opacity: 0 } : { opacity: 0, scale: 1.2 }}
+                        transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                        className="flex items-center gap-1.5"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span className="text-xs font-semibold">Sent ✓</span>
+                      </motion.div>
+                    )}
+
+                    {sendState === 'error' && (
+                      <motion.div
+                        key="error"
+                        initial={prefersReduced ? { opacity: 0 } : { opacity: 0, x: -10 }}
+                        animate={prefersReduced ? { opacity: 1 } : { opacity: 1, x: 0 }}
+                        exit={prefersReduced ? { opacity: 0 } : { opacity: 0, x: 10 }}
+                        transition={{ duration: 0.2 }}
+                        className="flex items-center gap-1.5"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        <span className="text-xs font-semibold">Retry</span>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </motion.button>
               )}
             </AnimatePresence>
@@ -219,6 +310,29 @@ export function ChatInput({ onSend, onStop, status, disabled }: ChatInputProps) 
           label="Image Assets"
           onClick={() => handleQuickAction('How can I optimize web images and lazy load assets in Next.js?')}
         />
+      </div>
+
+      {/* Demo Controls */}
+      <div className="flex items-center justify-center gap-3 mt-6 text-[11px] bg-purple-950/20 py-2 rounded-lg border border-purple-900/30 max-w-sm mx-auto backdrop-blur-sm">
+        <span className="text-purple-400/60 font-mono font-medium">Demo Mode:</span>
+        <button
+          onClick={() => setDemoMode('random')}
+          className={cn("px-2.5 py-1 rounded-md transition-all font-semibold", demoMode === 'random' ? "bg-purple-600 text-white shadow-sm shadow-purple-900/50" : "text-purple-300/60 hover:text-purple-200 hover:bg-purple-900/40")}
+        >
+          Normal (80/20)
+        </button>
+        <button
+          onClick={() => setDemoMode('success')}
+          className={cn("px-2.5 py-1 rounded-md transition-all font-semibold", demoMode === 'success' ? "bg-emerald-600 text-white shadow-sm shadow-emerald-900/50" : "text-purple-300/60 hover:text-emerald-200 hover:bg-emerald-900/40")}
+        >
+          Force Success
+        </button>
+        <button
+          onClick={() => setDemoMode('error')}
+          className={cn("px-2.5 py-1 rounded-md transition-all font-semibold", demoMode === 'error' ? "bg-rose-600 text-white shadow-sm shadow-rose-900/50" : "text-purple-300/60 hover:text-rose-200 hover:bg-rose-900/40")}
+        >
+          Force Error
+        </button>
       </div>
     </div>
   );
