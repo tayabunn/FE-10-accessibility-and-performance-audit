@@ -15,6 +15,7 @@ import {
   AI_PERSONAS, 
   AI_MODELS, 
   getAPIKeyStatus, 
+  getDemoResponseForPrompt,
 } from '@/lib/ai-config';
 import { 
   ALL_TOOLS, 
@@ -121,10 +122,10 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
     // Function to get active model instance
     const getActiveModel = () => {
       if (openrouter) {
-        let openRouterModelName = 'anthropic/claude-3.5-sonnet';
-        if (modelConfig.id === 'claude-3-5-sonnet') openRouterModelName = 'anthropic/claude-3.5-sonnet';
-        else if (modelConfig.id === 'gpt-4o') openRouterModelName = 'openai/gpt-4o';
-        else if (modelConfig.id === 'gemini-1-5-pro') openRouterModelName = 'google/gemini-2.0-flash-001';
+        let openRouterModelName = 'anthropic/claude-3-haiku';
+        if (modelConfig.id === 'claude-3-5-sonnet') openRouterModelName = 'anthropic/claude-3-haiku';
+        else if (modelConfig.id === 'gpt-4o') openRouterModelName = 'openai/gpt-4o-mini';
+        else if (modelConfig.id === 'gemini-1-5-pro') openRouterModelName = 'openai/gpt-4o-mini';
         return openrouter.chat(openRouterModelName);
       }
       if (modelConfig.provider === 'anthropic' && keyStatus.hasAnthropicKey) {
@@ -170,6 +171,7 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
             tools: ALL_TOOLS,
             stopWhen: isStepCount(5),
             temperature,
+            maxTokens: 1500,
             onEnd() {
               // 4. Send transient completion notification
               writer.write({
@@ -475,7 +477,9 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
           ? `I've prepared the lead export action. Please review the details in the confirmation widget above and click **Approve & Execute** to proceed.`
           : isMetaPrompt
           ? `Here is the comprehensive metadata and Open Graph inspection for **vercel.com**. The page scored 94/100 in SEO readiness with all key security headers active.`
-          : `Here is the full AI Lead Intelligence breakdown for **Stripe, Inc.** with an 88% conversion probability forecast.`;
+          : isLeadPrompt
+          ? `Here is the full AI Lead Intelligence breakdown for **Stripe, Inc.** with an 88% conversion probability forecast.`
+          : getDemoResponseForPrompt(lastUserMessage, persona.systemPrompt);
 
         const tokens = summaryText.match(/(\s+|\S+)/g) || [summaryText];
         for (const token of tokens) {

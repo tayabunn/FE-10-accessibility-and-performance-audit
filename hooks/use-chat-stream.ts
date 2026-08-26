@@ -72,22 +72,8 @@ export function useChatStream({
   initialMessages = [],
   onError,
 }: UseChatStreamOptions = {}) {
-  const [messages, setMessages] = useState<Message[]>(() => {
-    if (typeof window !== 'undefined' && initialMessages.length === 0) {
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            return parsed;
-          }
-        }
-      } catch {
-        // Ignore
-      }
-    }
-    return initialMessages;
-  });
+  const [messages, setMessages] = useState<Message[]>(initialMessages);
+  const [isClient, setIsClient] = useState(false);
   const [status, setStatus] = useState<StreamState>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<ToastNotification[]>([]);
@@ -102,16 +88,36 @@ export function useChatStream({
       })
   );
 
-  // Persist history
+  // Persist history and load on mount
   useEffect(() => {
+    setIsClient(true);
+    if (initialMessages.length === 0) {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setMessages(parsed);
+          }
+        }
+      } catch {
+        // Ignore
+      }
+    }
+  }, []); // Run only once on mount to avoid infinite loop from initialMessages array reference
+
+  useEffect(() => {
+    if (!isClient) return;
     try {
       if (messages.length > 0) {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+      } else if (messages.length === 0) {
+        localStorage.removeItem(STORAGE_KEY);
       }
     } catch {
       // Ignore
     }
-  }, [messages]);
+  }, [messages, isClient]);
 
   const addNotification = useCallback((msg: string, level: 'info' | 'warning' | 'error' = 'info') => {
     const id = `toast_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`;
@@ -376,8 +382,19 @@ export function useChatStream({
                 };
               }
 
-              // Text deltas
-              const tokenText = data.delta?.type === 'text_delta' ? data.delta.text : data.content;
+              // Error events from AI SDK stream
+              if (data.type === 'error') {
+                const errText = data.errorText || (typeof data.error === 'string' ? data.error : data.error?.message) || 'Streaming error occurred.';
+                throw new Error(errText);
+              }
+
+              // Text deltas (handles string delta, object delta, text, or content)
+              const tokenText = typeof data.delta === 'string'
+                ? data.delta
+                : data.delta?.type === 'text_delta'
+                ? data.delta.text
+                : data.delta?.text || (typeof data.text === 'string' ? data.text : null) || (typeof data.content === 'string' ? data.content : null);
+
               if (tokenText) {
                 accumulatedText += tokenText;
               }
@@ -419,7 +436,28 @@ export function useChatStream({
               }
             } catch {
               if (jsonStr) {
-                accumulatedText += jsonStr;
+                const trimmed = jsonStr.trim();
+                if (trimmed === '[DONE]' || trimmed === 'd:"[DONE]"') break;
+
+                let isHandled = false;
+                if (trimmed.startsWith('0:')) {
+                  try {
+                    accumulatedText += JSON.parse(trimmed.substring(2));
+                    isHandled = true;
+                  } catch {}
+                } else if (trimmed.startsWith('3:')) {
+                  let errStr = trimmed.substring(2);
+                  try { errStr = JSON.parse(errStr); } catch {}
+                  throw new Error(errStr);
+                } else if (trimmed.match(/^[a-z0-9]+:/i)) {
+                  // Ignore other AI SDK protocol parts silently
+                  isHandled = true;
+                }
+
+                if (!isHandled) {
+                  accumulatedText += jsonStr;
+                }
+
                 setMessages((prev) =>
                   prev.map((msg) =>
                     msg.id === assistantMessageId
@@ -457,8 +495,8 @@ export function useChatStream({
         } else {
           console.error('Streaming error:', err);
           const errObj = err instanceof Error ? err : new Error('Streaming request failed');
-          const msg = errObj.message;
-          setErrorMessage(msg);
+          const errorMessageText = errObj.message;
+          setErrorMessage(errorMessageText);
           setStatus('error');
           if (onError) onError(errObj);
           setMessages((prev) =>
@@ -467,8 +505,8 @@ export function useChatStream({
                 ? {
                     ...msg,
                     status: 'error',
-                    content: `⚠️ Error: ${msg}`,
-                    parts: [{ type: 'text', text: `⚠️ Error: ${msg}` }],
+                    content: `⚠️ Error: ${errorMessageText}`,
+                    parts: [{ type: 'text', text: `⚠️ Error: ${errorMessageText}` }],
                   }
                 : msg
             )

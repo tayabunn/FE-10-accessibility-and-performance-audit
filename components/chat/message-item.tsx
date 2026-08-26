@@ -5,11 +5,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Message, ToolInvocationPart, MessagePart } from '@/hooks/use-chat-stream';
 import dynamic from 'next/dynamic';
 
-const StreamingMarkdownRenderer = dynamic(
-  () => import('./markdown-renderer').then((mod) => mod.StreamingMarkdownRenderer)
-);
+import { StreamingMarkdownRenderer } from './markdown-renderer';
 import { ToolPartRenderer } from '../tools/tool-part-renderer';
 import { WeatherCard } from '../tools/weather-card';
+import { RateLimitCard } from '../tools/rate-limit-card';
 import { AIPersona } from '@/lib/ai-config';
 import { ConfirmActionInput } from '@/lib/tools';
 import { User, Sparkles, Copy, Check, RotateCcw, AlertTriangle, ExternalLink, Compass } from 'lucide-react';
@@ -190,10 +189,17 @@ export function MessageItem({
         {(isStreaming || textContent || isStopped || isError) && (
           <div className="relative" aria-live={isStreaming ? "polite" : "off"}>
             {isError ? (
-              <ChatErrorCard
-                error={textContent}
-                onRetry={onRegenerate || (() => {})}
-              />
+              (textContent.includes('429') || textContent.includes('Rate Limit') || textContent.includes('Quota')) ? (
+                <RateLimitCard
+                  provider={persona.name}
+                  onRetry={onRegenerate || (() => {})}
+                />
+              ) : (
+                <ChatErrorCard
+                  error={textContent}
+                  onRetry={onRegenerate || (() => {})}
+                />
+              )
             ) : textContent ? (
               <StreamingMarkdownRenderer
                 content={textContent}
