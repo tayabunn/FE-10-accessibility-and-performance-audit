@@ -21,7 +21,7 @@ jobs:
         run: npm ci
         
       - name: Run Component Tests (Vitest)
-        run: npm run test -- --run
+        run: npm run test:unit
         
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps

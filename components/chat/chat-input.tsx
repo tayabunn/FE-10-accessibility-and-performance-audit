@@ -114,12 +114,13 @@ export function ChatInput({ onSend, onStop, status, disabled }: ChatInputProps) 
               ? 'Astrine AI is streaming response...'
               : 'Type your request... (Enter to send, Shift+Enter for new line)'
           }
-          disabled={isBusy || disabled}
+          readOnly={isBusy}
+          disabled={disabled}
           rows={1}
           className={cn(
             'w-full px-4 py-3 resize-none border-none bg-transparent text-white text-sm md:text-base',
             'focus:outline-none focus:ring-0 focus-visible:ring-0',
-            'placeholder:text-purple-300/40 min-h-[48px] custom-scrollbar disabled:opacity-60'
+            'placeholder:text-purple-300/40 min-h-[48px] custom-scrollbar disabled:opacity-60 read-only:opacity-60'
           )}
           style={{ overflow: 'hidden' }}
         />

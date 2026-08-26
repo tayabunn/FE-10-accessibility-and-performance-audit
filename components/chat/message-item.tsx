@@ -3,7 +3,11 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Message, ToolInvocationPart, MessagePart } from '@/hooks/use-chat-stream';
-import { StreamingMarkdownRenderer } from './markdown-renderer';
+import dynamic from 'next/dynamic';
+
+const StreamingMarkdownRenderer = dynamic(
+  () => import('./markdown-renderer').then((mod) => mod.StreamingMarkdownRenderer)
+);
 import { ToolPartRenderer } from '../tools/tool-part-renderer';
 import { WeatherCard } from '../tools/weather-card';
 import { AIPersona } from '@/lib/ai-config';
@@ -184,7 +188,7 @@ export function MessageItem({
 
         {/* Render Markdown Text Content */}
         {(isStreaming || textContent || isStopped || isError) && (
-          <div className="relative">
+          <div className="relative" aria-live={isStreaming ? "polite" : "off"}>
             {isError ? (
               <ChatErrorCard
                 error={textContent}

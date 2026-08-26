@@ -84,7 +84,7 @@ export function ChatInterface() {
         />
 
         {/* Main Chat Content Area */}
-        <div className="relative z-10 flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+        <main className="relative z-10 flex-1 flex flex-col min-w-0 h-full overflow-hidden">
           {/* Real-time Network Disconnect Banner */}
           <OfflineBanner />
 
@@ -157,7 +157,7 @@ export function ChatInterface() {
 
           {/* Interactive Sabotage Test Panel Trigger */}
           <SabotagePanel onTriggerSabotage={handleTriggerSabotage} />
-        </div>
+        </main>
       </div>
     </ErrorBoundary>
   );
