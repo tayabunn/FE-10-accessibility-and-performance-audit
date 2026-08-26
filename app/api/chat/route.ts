@@ -171,7 +171,7 @@ Always invoke the appropriate tool when user queries fit these capabilities.`;
             tools: ALL_TOOLS,
             stopWhen: isStepCount(5),
             temperature,
-            maxTokens: 1500,
+            maxOutputTokens: 1500,
             onEnd() {
               // 4. Send transient completion notification
               writer.write({
