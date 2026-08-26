@@ -21,7 +21,7 @@ jobs:
         run: npm ci --legacy-peer-deps || npm install --legacy-peer-deps
         
       - name: Run Component Tests (Vitest)
-        run: npm run test:unit
+        run: npx vitest run --reporter=verbose
         
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps
