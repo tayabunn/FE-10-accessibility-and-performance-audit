@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test';
 test.describe('Primary User Flow', () => {
   test('user can send a message and receive a streaming AI response', async ({ page }) => {
     // Intercept the AI route to prevent real API calls and ensure deterministic behavior
-    await page.route('/api/chat', async (route) => {
+    await page.route('**/api/chat', async (route) => {
       // Mock an SSE streaming response
       const streamBody = [
         'data: {"type": "text_delta", "delta": {"type":"text_delta", "text":"Hello"}}',
@@ -23,6 +23,12 @@ test.describe('Primary User Flow', () => {
 
     // 1. Open the application
     await page.goto('/');
+
+    // Set demo mode to Force Success for deterministic testing
+    const forceSuccessBtn = page.getByRole('button', { name: /Force Success/i });
+    if (await forceSuccessBtn.isVisible()) {
+      await forceSuccessBtn.click();
+    }
 
     // 2. Find the primary interactive input
     const input = page.getByPlaceholder(/Type your request/i);
