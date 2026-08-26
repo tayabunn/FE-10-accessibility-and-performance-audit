@@ -26,6 +26,12 @@ vi.mock('@/components/tools/tool-part-renderer', () => ({
   ),
 }));
 
+vi.mock('@/components/tools/rate-limit-card', () => ({
+  RateLimitCard: ({ provider }: { provider?: string }) => (
+    <div data-testid="rate-limit-card">Rate limited: {provider}</div>
+  ),
+}));
+
 describe('MessageItem', () => {
   const mockPersona = {
     id: 'test-persona',

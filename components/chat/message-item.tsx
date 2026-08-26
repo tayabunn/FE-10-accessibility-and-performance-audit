@@ -5,10 +5,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Message, ToolInvocationPart, MessagePart } from '@/hooks/use-chat-stream';
 import dynamic from 'next/dynamic';
 
-import { StreamingMarkdownRenderer } from './markdown-renderer';
-import { ToolPartRenderer } from '../tools/tool-part-renderer';
-import { WeatherCard } from '../tools/weather-card';
-import { RateLimitCard } from '../tools/rate-limit-card';
+import { StreamingMarkdownRenderer } from '@/components/chat/markdown-renderer';
+import { ToolPartRenderer } from '@/components/tools/tool-part-renderer';
+import { WeatherCard } from '@/components/tools/weather-card';
+import { RateLimitCard } from '@/components/tools/rate-limit-card';
 import { AIPersona } from '@/lib/ai-config';
 import { ConfirmActionInput } from '@/lib/tools';
 import { User, Sparkles, Copy, Check, RotateCcw, AlertTriangle, ExternalLink, Compass } from 'lucide-react';
